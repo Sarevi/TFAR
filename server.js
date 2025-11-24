@@ -3145,9 +3145,12 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
     const cachedMedia = [];
     const cachedElaborada = [];
 
+    // FIX: Incluir tanto temas individuales como "examen-oficial" en la búsqueda
+    const searchTopics = [...allTopics, 'examen-oficial'];
+
     // Intentar obtener preguntas simples del caché
     for (let i = 0; i < simpleNeeded && cachedSimple.length < simpleNeeded; i++) {
-      const cached = db.getCachedQuestion(userId, allTopics, 'simple');
+      const cached = db.getCachedQuestion(userId, searchTopics, 'simple');
       if (cached) {
         cached.question._cacheId = cached.cacheId;
         cachedSimple.push(cached.question);
@@ -3159,7 +3162,7 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
 
     // Intentar obtener preguntas medias del caché
     for (let i = 0; i < mediaNeeded && cachedMedia.length < mediaNeeded; i++) {
-      const cached = db.getCachedQuestion(userId, allTopics, 'media');
+      const cached = db.getCachedQuestion(userId, searchTopics, 'media');
       if (cached) {
         cached.question._cacheId = cached.cacheId;
         cachedMedia.push(cached.question);
@@ -3171,7 +3174,7 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
 
     // Intentar obtener preguntas elaboradas del caché
     for (let i = 0; i < elaboratedNeeded && cachedElaborada.length < elaboratedNeeded; i++) {
-      const cached = db.getCachedQuestion(userId, allTopics, 'elaborada');
+      const cached = db.getCachedQuestion(userId, searchTopics, 'elaborada');
       if (cached) {
         cached.question._cacheId = cached.cacheId;
         cachedElaborada.push(cached.question);
@@ -3325,7 +3328,9 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
 
       for (const question of surplusQuestions) {
         try {
-          const cacheId = db.saveToCache(topicId, question.difficulty || 'media', question);
+          // FIX: Usar _sourceTopic en lugar de 'examen-oficial' para que puedan reutilizarse
+          const questionTopicId = question._sourceTopic || topicId;
+          const cacheId = db.saveToCache(questionTopicId, question.difficulty || 'media', question);
           if (cacheId) savedCount++;
         } catch (error) {
           console.error('Error guardando pregunta sobrante en caché:', error);
