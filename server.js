@@ -188,8 +188,8 @@ const anthropic = new Anthropic({
 // Limita las llamadas a Claude API para respetar el límite de 50 req/min
 // y prevenir errores 429 (Rate Limit Exceeded) con múltiples exámenes concurrentes
 const claudeLimiter = new Bottleneck({
-  maxConcurrent: 10,        // Máximo 10 requests simultáneos
-  minTime: 1200,            // Mínimo 1.2 segundos entre requests (50/min)
+  maxConcurrent: 20,        // Máximo 20 requests simultáneos (punto medio entre 10 y 30)
+  minTime: 1000,            // Mínimo 1 segundo entre requests (~60/min con margen)
   reservoir: 50,            // Pool de 50 tokens
   reservoirRefreshAmount: 50,
   reservoirRefreshInterval: 60 * 1000,  // Refrescar cada minuto
@@ -3195,7 +3195,7 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
     // Si faltan preguntas, generarlas en PARALELO CONTROLADO (más rápido pero sin saturar API)
     if (totalMissing > 0) {
       const promiseFunctions = [];
-      const MAX_CONCURRENT_CALLS = 10; // Máximo 10 llamadas simultáneas (sincronizado con claudeLimiter)
+      const MAX_CONCURRENT_CALLS = 20; // Máximo 20 llamadas simultáneas (sincronizado con claudeLimiter)
 
       // Generar preguntas SIMPLES faltantes en paralelo
       const simpleCallsMissing = Math.ceil(simpleMissing / 2);
