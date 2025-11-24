@@ -2075,8 +2075,8 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
                 const cached = db.getCachedQuestion(userId, [currentTopic], 'simple');
                 if (cached) {
                   cached.question._sourceTopic = currentTopic;
+                  cached.question._cacheId = cached.cacheId;
                   questions.push(cached.question);
-                  db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
                   cacheHits++;
                   console.log(`✓ Pregunta de caché (ID: ${cached.cacheId})`);
                 } else {
@@ -2124,7 +2124,8 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
                   if (finalScore >= 65) {
                     q._sourceTopic = currentTopic;
                     q._qualityScore = finalScore;
-                    db.saveToCacheAndTrack(userId, currentTopic, 'simple', q, 'exam');
+                    const cacheId = db.saveToCache(currentTopic, 'simple', q);
+                    q._cacheId = cacheId;
                     questions.push(q);
                     cacheMisses++;
                   } else {
@@ -2157,8 +2158,8 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
               const cached = db.getCachedQuestion(userId, [currentTopic], 'media');
               if (cached) {
                 cached.question._sourceTopic = currentTopic;
+                cached.question._cacheId = cached.cacheId;
                 questions.push(cached.question);
-                db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
                 cacheHits++;
                 console.log(`✓ Pregunta de caché (ID: ${cached.cacheId})`);
               } else {
@@ -2206,7 +2207,8 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
                   if (finalScore >= 65) {
                     q._sourceTopic = currentTopic;
                     q._qualityScore = finalScore;
-                    db.saveToCacheAndTrack(userId, currentTopic, 'media', q, 'exam');
+                    const cacheId = db.saveToCache(currentTopic, 'media', q);
+                    q._cacheId = cacheId;
                     questions.push(q);
                     cacheMisses++;
                   } else {
@@ -2239,8 +2241,8 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
               const cached = db.getCachedQuestion(userId, [currentTopic], 'elaborada');
               if (cached) {
                 cached.question._sourceTopic = currentTopic;
+                cached.question._cacheId = cached.cacheId;
                 questions.push(cached.question);
-                db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
                 cacheHits++;
                 console.log(`✓ Pregunta de caché (ID: ${cached.cacheId})`);
               } else {
@@ -2288,7 +2290,8 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
                   if (finalScore >= 65) {
                     q._sourceTopic = currentTopic;
                     q._qualityScore = finalScore;
-                    db.saveToCacheAndTrack(userId, currentTopic, 'elaborada', q, 'exam');
+                    const cacheId = db.saveToCache(currentTopic, 'elaborada', q);
+                    q._cacheId = cacheId;
                     questions.push(q);
                     cacheMisses++;
                   } else {
@@ -2555,9 +2558,9 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
       if (buffered && buffered.question) {
         questionToReturn = buffered.question;
 
-        // Marcar como vista si viene de caché
+        // Guardar cacheId en la pregunta para marcar como vista al responder
         if (buffered.cacheId) {
-          db.markQuestionAsSeen(userId, buffered.cacheId, 'study');
+          questionToReturn._cacheId = buffered.cacheId;
         }
 
         console.log(`⚡ Pregunta entregada desde buffer (INSTANT!)`);
@@ -2727,7 +2730,6 @@ async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.9
           cached.question._cacheId = cached.cacheId;
           cached.question._sourceTopic = topicId;
           batchQuestions.push(cached.question);
-          db.markQuestionAsSeen(userId, cached.cacheId, 'study');
           console.log(`💾 Pregunta ${questions.length + batchQuestions.length}/${count} desde caché (${difficulty})`);
         } else {
           break;
@@ -2793,7 +2795,8 @@ async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.9
               q._qualityScore = finalScore;
 
               // SIEMPRE guardar en caché (aprovecha 100% de preguntas generadas)
-              db.saveToCacheAndTrack(userId, topicId, difficulty, q, 'study');
+              const cacheId = db.saveToCache(topicId, difficulty, q);
+              q._cacheId = cacheId;
 
               // Solo añadir a batchQuestions las que necesitamos para el buffer
               if (batchQuestions.length < needed) {
@@ -2906,6 +2909,13 @@ app.post('/api/record-answer', requireAuth, (req, res) => {
 
     // LOG DETALLADO PARA DEBUG
     console.log(`📝 RECORD-ANSWER - Usuario: ${userId}, Tema: ${topicId}, isReview: ${isReview}, questionId: ${questionId}, isCorrect: ${isCorrect}`);
+
+    // Marcar pregunta como vista si tiene cacheId
+    if (questionData._cacheId) {
+      const context = isReview ? 'review' : 'study';
+      db.markQuestionAsSeen(userId, questionData._cacheId, context);
+      console.log(`✅ Pregunta marcada como vista (cacheId: ${questionData._cacheId})`);
+    }
 
     // Obtener título del tema
     const topicConfig = TOPIC_CONFIG[topicId];
@@ -3147,7 +3157,6 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
           cached.question._cacheId = cached.cacheId;
           cached.question._sourceTopic = topicId;
           cachedSimple.push(cached.question);
-          db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
         } else break;
       }
 
@@ -3158,7 +3167,6 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
           cached.question._cacheId = cached.cacheId;
           cached.question._sourceTopic = topicId;
           cachedMedia.push(cached.question);
-          db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
         } else break;
       }
 
@@ -3169,7 +3177,6 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
           cached.question._cacheId = cached.cacheId;
           cached.question._sourceTopic = topicId;
           cachedElaborada.push(cached.question);
-          db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
         } else break;
       }
 
@@ -3270,7 +3277,8 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
         // Guardar en caché con topicId correcto
         for (const q of newQuestions) {
           try {
-            db.saveToCacheAndTrack(userId, topicId, q.difficulty || 'media', q, 'exam');
+            const cacheId = db.saveToCache(topicId, q.difficulty || 'media', q);
+            q._cacheId = cacheId;
           } catch (error) {
             console.error(`    ❌ Error guardando en caché:`, error.message);
           }
