@@ -2845,10 +2845,14 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
     const cachedMedia = [];
     const cachedElaborada = [];
 
+    // FIX: Rastrear IDs ya usados en esta request para prevenir duplicados por race condition
+    const usedIds = [];
+
     // Intentar obtener preguntas simples del caché
     for (let i = 0; i < simpleNeeded && cachedSimple.length < simpleNeeded; i++) {
-      const cached = db.getCachedQuestion(userId, allTopics, 'simple');
+      const cached = db.getCachedQuestion(userId, allTopics, 'simple', usedIds);
       if (cached) {
+        usedIds.push(cached.cacheId); // Agregar a lista de exclusión para próximas queries
         cached.question._cacheId = cached.cacheId;
         cachedSimple.push(cached.question);
         db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
@@ -2859,8 +2863,9 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
 
     // Intentar obtener preguntas medias del caché
     for (let i = 0; i < mediaNeeded && cachedMedia.length < mediaNeeded; i++) {
-      const cached = db.getCachedQuestion(userId, allTopics, 'media');
+      const cached = db.getCachedQuestion(userId, allTopics, 'media', usedIds);
       if (cached) {
+        usedIds.push(cached.cacheId); // Agregar a lista de exclusión para próximas queries
         cached.question._cacheId = cached.cacheId;
         cachedMedia.push(cached.question);
         db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
@@ -2871,8 +2876,9 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
 
     // Intentar obtener preguntas elaboradas del caché
     for (let i = 0; i < elaboratedNeeded && cachedElaborada.length < elaboratedNeeded; i++) {
-      const cached = db.getCachedQuestion(userId, allTopics, 'elaborada');
+      const cached = db.getCachedQuestion(userId, allTopics, 'elaborada', usedIds);
       if (cached) {
+        usedIds.push(cached.cacheId); // Agregar a lista de exclusión para próximas queries
         cached.question._cacheId = cached.cacheId;
         cachedElaborada.push(cached.question);
         db.markQuestionAsSeen(userId, cached.cacheId, 'exam');

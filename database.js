@@ -738,7 +738,7 @@ const MAX_CACHE_SIZE = 10000; // Límite máximo de preguntas en caché
  * @param {string} difficulty - Dificultad requerida ('simple', 'media', 'elaborada')
  * @returns {object|null} - Pregunta del caché o null si no hay disponibles
  */
-function getCachedQuestion(userId, topicIds, difficulty) {
+function getCachedQuestion(userId, topicIds, difficulty, excludeIds = []) {
   const cutoffTime = Date.now() - (NO_REPEAT_DAYS * 24 * 3600 * 1000);
   const now = Date.now();
 
@@ -758,8 +758,15 @@ function getCachedQuestion(userId, topicIds, difficulty) {
       return null;
     }
 
-    // Construir placeholders para IN clause
+    // Construir placeholders para IN clause de topics
     const placeholders = topicArray.map(() => '?').join(',');
+
+    // FIX: Construir condición para excluir IDs ya seleccionados en esta request
+    let excludeCondition = '';
+    if (excludeIds.length > 0) {
+      const excludePlaceholders = excludeIds.map(() => '?').join(',');
+      excludeCondition = `AND qc.id NOT IN (${excludePlaceholders})`;
+    }
 
     // OPTIMIZACIÓN: Usar LEFT JOIN en lugar de subquery correlacionada
     // Esto es ~10-50x más rápido con 10K preguntas en caché
@@ -774,11 +781,13 @@ function getCachedQuestion(userId, topicIds, difficulty) {
         AND qc.difficulty = ?
         AND qc.expires_at > ?
         AND usq.question_cache_id IS NULL
+        ${excludeCondition}
       ORDER BY RANDOM()
       LIMIT 1
     `);
 
-    const result = stmt.get(userId, cutoffTime, ...topicArray, difficulty, now);
+    const params = [userId, cutoffTime, ...topicArray, difficulty, now, ...excludeIds];
+    const result = stmt.get(...params);
 
     if (result) {
       console.log(`✓ Pregunta encontrada en caché (ID: ${result.id}, Tema: ${result.topic_id})`);
