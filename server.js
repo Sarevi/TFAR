@@ -388,7 +388,7 @@ function calculateDelay(attempt, config = IMPROVED_CLAUDE_CONFIG) {
 }
 
 async function callClaudeWithImprovedRetry(fullPrompt, maxTokens = 700, questionType = 'media', questionsPerCall = 2, config = IMPROVED_CLAUDE_CONFIG) {
-  const ABSOLUTE_TIMEOUT = 90000; // 90 segundos máximo absoluto (aumentado por latencia Claude API)
+  const ABSOLUTE_TIMEOUT = 240000; // 4 minutos máximo absoluto (suficiente para exámenes de 100 preguntas)
 
   // Envolver toda la lógica de retry en un timeout absoluto
   const retryWithTimeout = Promise.race([
@@ -485,8 +485,8 @@ async function callClaudeWithImprovedRetry(fullPrompt, maxTokens = 700, question
     // Timeout absoluto
     new Promise((_, reject) =>
       setTimeout(() => {
-        console.error('⏰ TIMEOUT: La generación tardó más de 90 segundos');
-        reject(new Error('Timeout: La generación de preguntas tardó demasiado (>90s). Por favor, intenta de nuevo.'));
+        console.error('⏰ TIMEOUT: La generación tardó más de 4 minutos');
+        reject(new Error('Timeout: La generación de preguntas tardó demasiado (>4 minutos). Por favor, intenta de nuevo.'));
       }, ABSOLUTE_TIMEOUT)
     )
   ]);
