@@ -3005,7 +3005,33 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
         allGeneratedQuestions.push(...questions);
       }
 
-      console.log(`✅ Generación paralela completada: ${results.flat().length} preguntas nuevas generadas`);
+      const newlyGeneratedCount = results.flat().length;
+      console.log(`✅ Generación paralela completada: ${newlyGeneratedCount} preguntas nuevas generadas`);
+
+      // FIX: Guardar TODAS las preguntas recién generadas en caché (no solo las sobrantes)
+      // Esto permite que otros usuarios las reutilicen sin generar duplicados
+      if (newlyGeneratedCount > 0) {
+        const startIndex = allGeneratedQuestions.length - newlyGeneratedCount;
+        let savedNewCount = 0;
+
+        for (let i = startIndex; i < allGeneratedQuestions.length; i++) {
+          const question = allGeneratedQuestions[i];
+          try {
+            // Guardar cada pregunta nueva en caché con su tema correspondiente
+            const topicForCache = question.topic_id || topicId;
+            const cacheId = db.saveToCache(topicForCache, question.difficulty || 'media', question);
+            if (cacheId) {
+              // Asignar el cacheId a la pregunta para poder marcarla como vista después
+              question._cacheId = cacheId;
+              savedNewCount++;
+            }
+          } catch (error) {
+            console.error('Error guardando pregunta nueva en caché:', error);
+          }
+        }
+
+        console.log(`💾 ${savedNewCount}/${newlyGeneratedCount} preguntas nuevas guardadas en caché para reutilización`);
+      }
     }
 
     // Validar que tenemos AL MENOS las preguntas solicitadas (gracias al buffer del 10%)
@@ -3020,25 +3046,18 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
       });
     }
 
-    // Éxito: tenemos suficientes preguntas gracias al buffer
+    // Marcar TODAS las preguntas usadas como vistas por este usuario
+    const questionsToUse = allGeneratedQuestions.slice(0, questionCount);
+    for (const question of questionsToUse) {
+      if (question._cacheId) {
+        // Ya tiene cacheId (venía del caché), marcar como vista
+        db.markQuestionAsSeen(userId, question._cacheId, 'exam');
+      }
+    }
+
     if (allGeneratedQuestions.length > questionCount) {
       const surplus = allGeneratedQuestions.length - questionCount;
-      console.log(`✅ Buffer funcionó: ${allGeneratedQuestions.length} generadas, usando ${questionCount}, guardando ${surplus} sobrantes en caché`);
-
-      // Guardar preguntas sobrantes en el caché para reutilizarlas
-      const surplusQuestions = allGeneratedQuestions.slice(questionCount);
-      let savedCount = 0;
-
-      for (const question of surplusQuestions) {
-        try {
-          const cacheId = db.saveToCache(topicId, question.difficulty || 'media', question);
-          if (cacheId) savedCount++;
-        } catch (error) {
-          console.error('Error guardando pregunta sobrante en caché:', error);
-        }
-      }
-
-      console.log(`💾 ${savedCount}/${surplus} preguntas sobrantes guardadas en caché para uso futuro`);
+      console.log(`✅ Buffer funcionó: ${allGeneratedQuestions.length} generadas, usando ${questionCount}, ${surplus} extras disponibles en caché`);
     } else {
       console.log(`✅ Generación exacta: ${allGeneratedQuestions.length} preguntas`);
     }
