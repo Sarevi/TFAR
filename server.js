@@ -2690,6 +2690,7 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
 async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.90) {
   const batchStartTime = Date.now();
   const questions = [];
+  const usedIds = []; // 🔧 FIX: Array para evitar preguntas duplicadas en el mismo batch
   const MAX_RETRIES = count * 2; // Intentar hasta el doble para asegurar al menos 1 pregunta
 
   // Obtener contenido del tema
@@ -2722,8 +2723,9 @@ async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.9
     if (tryCache) {
       const needed = Math.min(2, count - questions.length);
       for (let i = 0; i < needed; i++) {
-        const cached = db.getCachedQuestion(userId, [topicId], difficulty);
+        const cached = db.getCachedQuestion(userId, [topicId], difficulty, usedIds); // 🔧 FIX: Pasar excludeIds
         if (cached) {
+          usedIds.push(cached.cacheId); // 🔧 FIX: Acumular IDs para evitar duplicados
           cached.question._cacheId = cached.cacheId;
           cached.question._sourceTopic = topicId;
           batchQuestions.push(cached.question);

@@ -1788,7 +1788,7 @@
             }
         }
 
-        async function updateLocalStats(topicId, isCorrect, isReview = false, questionId = null) {
+        async function updateLocalStats(topicId, isCorrect, isReview = false, questionId = null, userAnswer = null) {
             const topicConfig = availableTopics.find(([id]) => id === topicId);
             const topicTitle = topicConfig ? topicConfig[1].title : 'Tema desconocido';
 
@@ -1811,12 +1811,31 @@
                 userStats[topicId].accuracy = Math.round((userStats[topicId].correctAnswers / userStats[topicId].totalQuestions) * 100);
             }
 
-            // Enviar al servidor
+            // 🔧 FIX: Actualizar lista de preguntas falladas localmente si aplica
+            if (!isCorrect && !isReview && userAnswer !== null) {
+                if (!failedQuestions[topicId]) {
+                    failedQuestions[topicId] = {
+                        title: topicTitle,
+                        questions: []
+                    };
+                }
+
+                const failedQuestion = {
+                    ...currentQuestion,
+                    userAnswer,
+                    date: new Date().toISOString(),
+                    id: Date.now() + Math.random()
+                };
+
+                failedQuestions[topicId].questions.push(failedQuestion);
+            }
+
+            // Enviar al servidor (UNA SOLA LLAMADA)
             try {
                 const requestBody = {
                     topicId,
                     questionData: currentQuestion,
-                    userAnswer: null,
+                    userAnswer: !isCorrect && userAnswer !== null ? userAnswer : null, // 🔧 FIX: Enviar userAnswer solo si es incorrecta
                     isCorrect
                 };
 
@@ -2357,13 +2376,9 @@
                 // NO actualizar estadísticas ni preguntas falladas en modo oficial
             } else {
                 // MODO NORMAL O REPASO
-                // Actualizar estadísticas (o marcar como revisada si es repaso)
-                await updateLocalStats(currentTopic, isCorrect, isReview, questionId);
-
-                // Solo agregar a preguntas falladas si NO es modo repaso
-                if (!isCorrect && !isReview) {
-                    await addLocalFailedQuestion(currentTopic, currentQuestion, userAnswer);
-                }
+                // 🔧 FIX: Consolidado en una sola llamada (antes eran 2 llamadas separadas)
+                // Actualizar estadísticas Y agregar a preguntas falladas en un solo request
+                await updateLocalStats(currentTopic, isCorrect, isReview, questionId, userAnswer);
             }
 
             document.querySelectorAll('.option').forEach((opt, index) => {
