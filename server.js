@@ -216,6 +216,70 @@ const backgroundGenerations = new Map();
 // TTL para limpieza automática (5 minutos por defecto)
 const BACKGROUND_GENERATION_TTL = 5 * 60 * 1000;
 
+// ========================
+// TRACKING DE PREGUNTAS USADAS POR SESIÓN (Previene duplicados)
+// ========================
+// Map: userId -> { ids: [...], lastAccess: timestamp }
+const studySessionUsedIds = new Map();
+
+const MAX_USED_IDS_PER_USER = 200; // Límite para evitar memory leak
+const USED_IDS_TTL_MS = 2 * 60 * 60 * 1000; // 2 horas
+
+/**
+ * Obtener array de IDs usados por usuario
+ */
+function getUsedIds(userId) {
+  if (!studySessionUsedIds.has(userId)) {
+    studySessionUsedIds.set(userId, {
+      ids: [],
+      lastAccess: Date.now()
+    });
+  }
+
+  const session = studySessionUsedIds.get(userId);
+  session.lastAccess = Date.now();
+
+  return session.ids;
+}
+
+/**
+ * Agregar ID a lista de usados (con límite FIFO)
+ */
+function addUsedId(userId, questionId) {
+  const usedIds = getUsedIds(userId);
+
+  // Evitar duplicados
+  if (!usedIds.includes(questionId)) {
+    usedIds.push(questionId);
+
+    // Limitar tamaño (FIFO - eliminar más antiguo)
+    if (usedIds.length > MAX_USED_IDS_PER_USER) {
+      const removed = usedIds.shift();
+      console.log(`⚠️ usedIds lleno para user ${userId}, removiendo ID más antiguo: ${removed}`);
+    }
+  }
+}
+
+/**
+ * Limpieza periódica de sesiones inactivas (cada 10 minutos)
+ */
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+
+  for (const [userId, session] of studySessionUsedIds.entries()) {
+    if (now - session.lastAccess > USED_IDS_TTL_MS) {
+      studySessionUsedIds.delete(userId);
+      cleaned++;
+      console.log(`🗑️ Sesión usedIds limpiada: user ${userId}`);
+    }
+  }
+
+  if (cleaned > 0) {
+    console.log(`✅ Limpieza de sesiones: ${cleaned} eliminadas, ${studySessionUsedIds.size} activas`);
+  }
+}, 10 * 60 * 1000); // Cada 10 minutos
+
 // Función auxiliar para ejecutar generación controlada
 async function runControlledBackgroundGeneration(userId, topicId, generationFn) {
   const key = `${userId}-${topicId}`;
@@ -1727,6 +1791,76 @@ app.get('/api/admin/export/all', requireAdmin, (req, res) => {
 });
 
 // ========================
+// ENDPOINT DE MONITOREO DE BUFFERS (Admin)
+// ========================
+app.get('/api/admin/buffer-stats', requireAdmin, (req, res) => {
+  try {
+    const stats = {
+      buffers: {
+        total: 0,
+        details: []
+      },
+      sessions: {
+        total: studySessionUsedIds.size,
+        details: []
+      },
+      backgroundGenerations: {
+        total: backgroundGenerations.size,
+        active: []
+      },
+      memory: process.memoryUsage(),
+      timestamp: new Date().toISOString()
+    };
+
+    // Obtener todos los buffers de la base de datos
+    const bufferQuery = db.db.prepare(`
+      SELECT
+        user_id,
+        topic_id,
+        COUNT(*) as question_count,
+        MIN(created_at) as oldest,
+        MAX(created_at) as newest,
+        MIN(expires_at) as first_expiry
+      FROM user_question_buffer
+      WHERE expires_at > ?
+      GROUP BY user_id, topic_id
+      ORDER BY question_count DESC
+    `);
+
+    const now = Date.now();
+    const activeBuffers = bufferQuery.all(now);
+
+    stats.buffers.total = activeBuffers.length;
+    stats.buffers.details = activeBuffers.map(b => ({
+      userId: b.user_id,
+      topicId: b.topic_id,
+      questions: b.question_count,
+      ageMinutes: Math.round((now - b.oldest) / 1000 / 60),
+      expiresIn: Math.round((b.first_expiry - now) / 1000 / 60)
+    }));
+
+    // Detalles de sesiones usedIds
+    for (const [userId, session] of studySessionUsedIds.entries()) {
+      stats.sessions.details.push({
+        userId: userId,
+        usedIdsCount: session.ids.length,
+        inactiveMinutes: Math.round((now - session.lastAccess) / 1000 / 60)
+      });
+    }
+
+    // Generaciones en background activas
+    for (const [key, promise] of backgroundGenerations.entries()) {
+      stats.backgroundGenerations.active.push(key);
+    }
+
+    res.json(stats);
+  } catch (error) {
+    console.error('❌ Error obteniendo estadísticas de buffers:', error);
+    res.status(500).json({ error: 'Error al obtener estadísticas' });
+  }
+});
+
+// ========================
 // RUTAS DE LA API OPTIMIZADAS
 // ========================
 
@@ -2225,8 +2359,10 @@ app.post('/api/study/pre-warm', requireAuth, async (req, res) => {
       runControlledBackgroundGeneration(userId, topicId, async () => {
         console.log(`🔨 [Background] Generando 2 preguntas para pre-warming (cache agresivo: 80%)...`);
 
+        // ✅ Obtener usedIds del usuario para prevenir duplicados
+        const usedIds = getUsedIds(userId);
         const questionsNeeded = 2 - currentBufferSize;
-        const batchQuestions = await generateQuestionBatch(userId, topicId, questionsNeeded, 0.80);
+        const batchQuestions = await generateQuestionBatch(userId, topicId, questionsNeeded, 0.80, usedIds);
 
         // Añadir todas al buffer
         for (const q of batchQuestions) {
@@ -2250,8 +2386,11 @@ app.post('/api/study/pre-warm', requireAuth, async (req, res) => {
 
 // ====================================================================
 // FASE 2: ENDPOINT CON PREFETCH PARA ESTUDIO (RESPUESTA INSTANTÁNEA)
+// ✅ ESTRATEGIA 70/30: 70% cache / 30% buffer para máxima variedad
 // ====================================================================
 app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
+  const startTime = Date.now();
+
   try {
     const { topicId } = req.body;
     const userId = req.user.id;
@@ -2268,85 +2407,139 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
 
     console.log(`📚 Usuario ${userId} solicita pregunta de estudio: ${topicId}`);
 
-    // PASO 1: Verificar si hay pregunta en buffer
-    const bufferSize = db.getBufferSize(userId, topicId);
-    console.log(`💾 Buffer actual: ${bufferSize} preguntas`);
+    // ✅ Obtener usedIds de la sesión (previene duplicados)
+    const usedIds = getUsedIds(userId);
+
+    const buffer = { questions: [], size: db.getBufferSize(userId, topicId) };
+    console.log(`💾 Buffer actual: ${buffer.size} preguntas | usedIds: ${usedIds.length}`);
 
     let questionToReturn = null;
+    let source = null;
 
-    if (bufferSize > 0) {
-      // Obtener pregunta del buffer (INSTANT!)
-      const buffered = db.getFromBuffer(userId, topicId);
+    // ═══════════════════════════════════════════════════════
+    // ESTRATEGIA 70/30: Decidir origen aleatoriamente
+    // ═══════════════════════════════════════════════════════
+    const randomValue = Math.random();
+    const preferCache = randomValue < 0.70; // 70% cache, 30% buffer
 
-      if (buffered && buffered.question) {
-        questionToReturn = buffered.question;
+    console.log(`🎲 Random: ${randomValue.toFixed(2)} → ${preferCache ? 'CACHE' : 'BUFFER'} primero`);
 
-        // Marcar como vista si viene de caché
-        if (buffered.cacheId) {
-          db.markQuestionAsSeen(userId, buffered.cacheId, 'study');
+    if (preferCache) {
+      // ─────────────────────────────────────────────────────
+      // 70% DEL TIEMPO: Intentar CACHE primero
+      // ─────────────────────────────────────────────────────
+      try {
+        const cached = db.getCachedQuestion(userId, [topicId], 'media', usedIds);
+        if (cached) {
+          questionToReturn = cached.question;
+          questionToReturn._cacheId = cached.cacheId;
+          source = 'cache';
+          // ✅ FIX: NO marcar como "seen" aquí - se marcará al responder
+          console.log(`💾 Pregunta #${cached.cacheId} del CACHE (${Date.now() - startTime}ms)`);
         }
+      } catch (error) {
+        console.error(`❌ Error obteniendo del cache:`, error);
+      }
 
-        console.log(`⚡ Pregunta entregada desde buffer (INSTANT!)`);
-
-        // Check buffer size after retrieval
-        const newBufferSize = db.getBufferSize(userId, topicId);
-        console.log(`💾 Buffer después de entrega: ${newBufferSize} preguntas`);
-
-        // Si buffer bajó de 3, rellenar en background
-        if (newBufferSize < 3) {
-          console.log(`🔄 Buffer bajo (${newBufferSize}), iniciando refill en background...`);
-
-          // Generar 2-3 preguntas más en background (CONTROLADO - previene duplicados)
-          setImmediate(() => {
-            runControlledBackgroundGeneration(userId, topicId, async () => {
-              await refillBuffer(userId, topicId, 3 - newBufferSize);
-            });
-          });
+      // Fallback: Buffer si cache falló o vacío
+      if (!questionToReturn && buffer.size > 0) {
+        const buffered = db.getFromBuffer(userId, topicId);
+        if (buffered && buffered.question) {
+          questionToReturn = buffered.question;
+          questionToReturn._cacheId = buffered.cacheId;
+          source = 'buffer-fallback';
+          buffer.size = db.getBufferSize(userId, topicId);
+          console.log(`📦 Pregunta del BUFFER (fallback cache vacío)`);
         }
+      }
+    } else {
+      // ─────────────────────────────────────────────────────
+      // 30% DEL TIEMPO: Intentar BUFFER primero
+      // ─────────────────────────────────────────────────────
+      if (buffer.size > 0) {
+        const buffered = db.getFromBuffer(userId, topicId);
+        if (buffered && buffered.question) {
+          questionToReturn = buffered.question;
+          questionToReturn._cacheId = buffered.cacheId;
+          source = 'buffer';
+          buffer.size = db.getBufferSize(userId, topicId);
+          console.log(`📦 Pregunta del BUFFER (${Date.now() - startTime}ms)`);
+        }
+      }
 
-        // Aleatorizar opciones antes de devolver
-        const randomizedQuestion = randomizeQuestionOptions(questionToReturn);
-
-        // Retornar inmediatamente
-        return res.json({
-          questions: [randomizedQuestion],
-          source: 'buffer',
-          bufferSize: newBufferSize
-        });
-      } else {
-        // Buffer reportó preguntas pero getFromBuffer falló (datos corruptos?)
-        console.warn(`⚠️ Buffer reportó ${bufferSize} preguntas pero getFromBuffer retornó null`);
+      // Fallback: Cache si buffer vacío
+      if (!questionToReturn) {
+        try {
+          const cached = db.getCachedQuestion(userId, [topicId], 'media', usedIds);
+          if (cached) {
+            questionToReturn = cached.question;
+            questionToReturn._cacheId = cached.cacheId;
+            source = 'cache-fallback';
+            console.log(`💾 Pregunta #${cached.cacheId} del CACHE (fallback buffer vacío)`);
+          }
+        } catch (error) {
+          console.error(`❌ Error obteniendo del cache:`, error);
+        }
       }
     }
 
-    // PASO 2: Buffer vacío - generar batch de 3 preguntas (optimizado FASE 3)
-    console.log(`🔨 Buffer vacío - generando batch inicial de 3 preguntas...`);
+    // ═══════════════════════════════════════════════════════
+    // ÚLTIMO RECURSO: Generar batch nuevo (cache Y buffer vacíos)
+    // ═══════════════════════════════════════════════════════
+    if (!questionToReturn) {
+      console.log(`🔨 Cache y buffer vacíos, generando batch de 3 preguntas...`);
 
-    const batchQuestions = await generateQuestionBatch(userId, topicId, 3);
+      const batchQuestions = await generateQuestionBatch(userId, topicId, 3, 0.70, usedIds);
 
-    if (batchQuestions.length === 0) {
-      return res.status(500).json({ error: 'No se pudieron generar preguntas' });
+      if (batchQuestions.length === 0) {
+        return res.status(500).json({ error: 'No se pudieron generar preguntas' });
+      }
+
+      // Primera pregunta para retornar
+      questionToReturn = batchQuestions[0];
+      source = 'generated';
+
+      // Resto al buffer (2 preguntas en batch de 3)
+      for (let i = 1; i < batchQuestions.length; i++) {
+        const q = batchQuestions[i];
+        db.addToBuffer(userId, topicId, q, q.difficulty, q._cacheId || null);
+      }
+
+      buffer.size = db.getBufferSize(userId, topicId);
+      console.log(`✅ Batch generado: 1 entregada + ${buffer.size} en buffer`);
     }
 
-    // Primera pregunta para retornar
-    questionToReturn = batchQuestions[0];
-
-    // Resto al buffer (2 preguntas en batch de 3)
-    for (let i = 1; i < batchQuestions.length; i++) {
-      const q = batchQuestions[i];
-      db.addToBuffer(userId, topicId, q, q.difficulty, q._cacheId || null);
+    // ═══════════════════════════════════════════════════════
+    // AGREGAR A usedIds (previene ver misma pregunta en sesión)
+    // ═══════════════════════════════════════════════════════
+    if (questionToReturn._cacheId) {
+      addUsedId(userId, questionToReturn._cacheId);
     }
 
-    const finalBufferSize = db.getBufferSize(userId, topicId);
-    console.log(`✅ Batch generado: 1 entregada + ${finalBufferSize} en buffer`);
+    // ═══════════════════════════════════════════════════════
+    // MANTENER BUFFER LLENO (pre-warming automático)
+    // ═══════════════════════════════════════════════════════
+    const MIN_BUFFER_SIZE = 3;
+    if (buffer.size < MIN_BUFFER_SIZE) {
+      console.log(`⚡ Buffer bajo (${buffer.size}/${MIN_BUFFER_SIZE}), iniciando pre-warming...`);
+
+      setImmediate(() => {
+        runControlledBackgroundGeneration(userId, topicId, async () => {
+          await refillBuffer(userId, topicId, MIN_BUFFER_SIZE - buffer.size, usedIds);
+        });
+      });
+    }
 
     // Aleatorizar opciones antes de devolver
     const randomizedQuestion = randomizeQuestionOptions(questionToReturn);
 
+    const duration = Date.now() - startTime;
+    console.log(`✅ Pregunta entregada | Fuente: ${source} | Buffer: ${buffer.size} | Tiempo: ${duration}ms`);
+
     res.json({
       questions: [randomizedQuestion],
-      source: 'generated',
-      bufferSize: finalBufferSize
+      source: source,
+      bufferSize: buffer.size
     });
 
   } catch (error) {
@@ -2393,8 +2586,13 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
 /**
  * Generar batch de preguntas (mix de caché + nuevas)
  * cacheProb aumentado a 70% para optimizar costos (ahorro ~25%)
+ * @param {number} userId - ID del usuario
+ * @param {string} topicId - ID del tema
+ * @param {number} count - Cantidad de preguntas a generar
+ * @param {number} cacheProb - Probabilidad de intentar cache (0.0 - 1.0)
+ * @param {Array<number>} excludeIds - IDs de preguntas a excluir (previene duplicados)
  */
-async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.70) {
+async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.70, excludeIds = []) {
   const questions = [];
   const MAX_RETRIES = count * 2; // Intentar hasta el doble para asegurar al menos 1 pregunta
 
@@ -2426,12 +2624,19 @@ async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.7
     if (tryCache) {
       const needed = Math.min(2, count - questions.length);
       for (let i = 0; i < needed; i++) {
-        const cached = db.getCachedQuestion(userId, [topicId], difficulty);
+        // ✅ FIX: Pasar excludeIds para prevenir duplicados + IDs ya obtenidos en este batch
+        const allExcludeIds = [
+          ...excludeIds,
+          ...questions.map(q => q._cacheId).filter(id => id != null),
+          ...batchQuestions.map(q => q._cacheId).filter(id => id != null)
+        ];
+
+        const cached = db.getCachedQuestion(userId, [topicId], difficulty, allExcludeIds);
         if (cached) {
           cached.question._cacheId = cached.cacheId;
           cached.question._sourceTopic = topicId;
           batchQuestions.push(cached.question);
-          db.markQuestionAsSeen(userId, cached.cacheId, 'study');
+          // ✅ FIX: NO marcar como "seen" aquí - se marcará al responder
           console.log(`💾 Pregunta ${questions.length + batchQuestions.length}/${count} desde caché (${difficulty})`);
         } else {
           break;
@@ -2563,8 +2768,12 @@ async function executeWithConcurrencyLimit(promiseFunctions, concurrencyLimit = 
 
 /**
  * Rellenar buffer en background
+ * @param {number} userId - ID del usuario
+ * @param {string} topicId - ID del tema
+ * @param {number} count - Cantidad de preguntas a generar
+ * @param {Array<number>} usedIds - IDs de preguntas ya usadas (previene duplicados)
  */
-async function refillBuffer(userId, topicId, count = 3) {
+async function refillBuffer(userId, topicId, count = 3, usedIds = []) {
   console.log(`🔄 [Background] Rellenando buffer con ${count} preguntas...`);
 
   try {
@@ -2586,7 +2795,8 @@ async function refillBuffer(userId, topicId, count = 3) {
 
     console.log(`🔄 [Background] Generando ${actualCount} preguntas (buffer actual: ${currentBufferSize})`);
 
-    const newQuestions = await generateQuestionBatch(userId, topicId, actualCount);
+    // ✅ Pasar usedIds para prevenir duplicados
+    const newQuestions = await generateQuestionBatch(userId, topicId, actualCount, 0.70, usedIds);
 
     for (const q of newQuestions) {
       db.addToBuffer(userId, topicId, q, q.difficulty, q._cacheId || null);
@@ -2601,15 +2811,27 @@ async function refillBuffer(userId, topicId, count = 3) {
 
 app.post('/api/record-answer', requireAuth, (req, res) => {
   try {
-    const { topicId, questionData, userAnswer, isCorrect, isReview, questionId } = req.body;
+    const { topicId, questionData, userAnswer, isCorrect, isReview, questionId, cacheId } = req.body;
     const userId = req.user.id;
 
     // LOG DETALLADO PARA DEBUG
-    console.log(`📝 RECORD-ANSWER - Usuario: ${userId}, Tema: ${topicId}, isReview: ${isReview}, questionId: ${questionId}, isCorrect: ${isCorrect}`);
+    console.log(`📝 RECORD-ANSWER - Usuario: ${userId}, Tema: ${topicId}, isReview: ${isReview}, questionId: ${questionId}, cacheId: ${cacheId}, isCorrect: ${isCorrect}`);
 
     // Obtener título del tema
     const topicConfig = TOPIC_CONFIG[topicId];
     const topicTitle = topicConfig?.title || 'Tema desconocido';
+
+    // ✅ FIX: Marcar pregunta como "seen" AQUÍ (cuando usuario responde)
+    // Solo si tiene cacheId (preguntas del cache)
+    if (cacheId) {
+      try {
+        db.markQuestionAsSeen(userId, cacheId, 'study');
+        console.log(`👁️ Pregunta #${cacheId} marcada como vista por usuario ${userId}`);
+      } catch (error) {
+        console.error(`⚠️ Error marcando pregunta como vista:`, error);
+        // No fallar el request si esto falla
+      }
+    }
 
     // SISTEMA DE REPASO: Si es una pregunta de repaso
     if (isReview && questionId) {
