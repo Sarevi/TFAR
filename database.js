@@ -846,8 +846,9 @@ function cleanOldCacheIfNeeded() {
 }
 
 /**
- * Guardar pregunta en caché y marcarla como vista por el usuario
- * @param {number} userId - ID del usuario
+ * Guardar pregunta en caché (sin marcar como vista)
+ * NOTA: La pregunta se marca como "seen" en /api/record-answer cuando usuario responde
+ * @param {number} userId - ID del usuario (para contador)
  * @param {string} topicId - ID del tema
  * @param {string} difficulty - Dificultad de la pregunta
  * @param {object} questionData - Datos completos de la pregunta
@@ -878,15 +879,10 @@ function saveToCacheAndTrack(userId, topicId, difficulty, questionData, context 
 
     const cacheId = result.lastInsertRowid;
 
-    // 2. Marcar como vista por este usuario
-    const trackStmt = db.prepare(`
-      INSERT INTO user_seen_questions (user_id, question_cache_id, seen_at, context)
-      VALUES (?, ?, ?, ?)
-    `);
+    // ✅ FIX: NO marcar como "seen" aquí - solo guardar en caché
+    // El marking como "seen" ocurre en /api/record-answer cuando usuario responde
 
-    trackStmt.run(userId, cacheId, now, context);
-
-    // 3. Incrementar contador de uso
+    // 2. Incrementar contador de uso
     const updateStmt = db.prepare(`
       UPDATE question_cache
       SET times_used = times_used + 1
@@ -895,7 +891,7 @@ function saveToCacheAndTrack(userId, topicId, difficulty, questionData, context 
 
     updateStmt.run(cacheId);
 
-    console.log(`✅ Pregunta guardada en caché (ID: ${cacheId}) y marcada como vista por usuario ${userId}`);
+    console.log(`✅ Pregunta guardada en caché (ID: ${cacheId}) - Disponible para reuso`);
     return cacheId;
   } catch (error) {
     console.error('Error guardando en caché:', error);

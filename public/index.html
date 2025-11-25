@@ -1820,6 +1820,11 @@
                     isCorrect
                 };
 
+                // Agregar cacheId si la pregunta viene del cache
+                if (currentQuestion && currentQuestion._cacheId) {
+                    requestBody.cacheId = currentQuestion._cacheId;
+                }
+
                 // Agregar parámetros de repaso si aplica
                 if (isReview && questionId) {
                     requestBody.isReview = true;
@@ -1881,16 +1886,23 @@
 
             // Enviar al servidor
             try {
+                const requestBody = {
+                    topicId,
+                    questionData,
+                    userAnswer,
+                    isCorrect: false
+                };
+
+                // Agregar cacheId si la pregunta viene del cache
+                if (questionData && questionData._cacheId) {
+                    requestBody.cacheId = questionData._cacheId;
+                }
+
                 const response = await fetch(`${API_BASE}/api/record-answer`, {
                     method: 'POST',
                     credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        topicId,
-                        questionData,
-                        userAnswer,
-                        isCorrect: false
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if (response.status === 401 || response.status === 403) {
