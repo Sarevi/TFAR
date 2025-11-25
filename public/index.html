@@ -2116,6 +2116,11 @@
             officialExamQuestions = [];
             officialExamAnswers = [];
 
+            // FIX: Ocultar barra de progreso del examen al entrar en modo estudio
+            document.getElementById('exam-progress-bar').style.display = 'none';
+            document.getElementById('exam-progress-text').style.display = 'none';
+            document.getElementById('exam-finish-container').style.display = 'none';
+
             currentTopic = selectedTopicId;
 
             const topicConfig = availableTopics.find(([id]) => id === selectedTopicId);
