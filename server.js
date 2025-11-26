@@ -188,7 +188,7 @@ const anthropic = new Anthropic({
 // Limita las llamadas a Claude API para respetar el límite de 50 req/min
 // y prevenir errores 429 (Rate Limit Exceeded) con múltiples exámenes concurrentes
 const claudeLimiter = new Bottleneck({
-  maxConcurrent: 20,        // Máximo 20 requests simultáneos (punto medio entre 10 y 30)
+  maxConcurrent: 35,        // Máximo 35 requests simultáneos (optimizado para reducir timeouts)
   minTime: 1000,            // Mínimo 1 segundo entre requests (~60/min con margen)
   reservoir: 50,            // Pool de 50 tokens
   reservoirRefreshAmount: 50,
@@ -388,7 +388,7 @@ function calculateDelay(attempt, config = IMPROVED_CLAUDE_CONFIG) {
 }
 
 async function callClaudeWithImprovedRetry(fullPrompt, maxTokens = 700, questionType = 'media', questionsPerCall = 2, config = IMPROVED_CLAUDE_CONFIG) {
-  const ABSOLUTE_TIMEOUT = 90000; // 90 segundos máximo absoluto (aumentado por latencia Claude API)
+  const ABSOLUTE_TIMEOUT = 180000; // 180 segundos (3 minutos) - margen para colas en horas pico
 
   // Envolver toda la lógica de retry en un timeout absoluto
   const retryWithTimeout = Promise.race([
@@ -485,8 +485,8 @@ async function callClaudeWithImprovedRetry(fullPrompt, maxTokens = 700, question
     // Timeout absoluto
     new Promise((_, reject) =>
       setTimeout(() => {
-        console.error('⏰ TIMEOUT: La generación tardó más de 90 segundos');
-        reject(new Error('Timeout: La generación de preguntas tardó demasiado (>90s). Por favor, intenta de nuevo.'));
+        console.warn('⏱️ Generación tardó más de 3 minutos (posible sobrecarga del servicio)');
+        reject(new Error('El servicio está experimentando alta demanda. Por favor, intenta de nuevo en unos momentos.'));
       }, ABSOLUTE_TIMEOUT)
     )
   ]);
@@ -3758,15 +3758,15 @@ async function startServer() {
       console.log('\n🎯 ¡Sistema listo para generar exámenes!');
       console.log('========================================\n');
 
-      // FASE 2: Limpiar buffers y caché expirados cada 30 minutos
+      // FASE 2: Limpiar buffers y caché expirados cada 24 horas
       setInterval(() => {
         console.log('🧹 Ejecutando limpieza periódica...');
         const buffersDeleted = db.cleanExpiredBuffers();
         const cacheDeleted = db.cleanExpiredCache();
         console.log(`✅ Limpieza completada: ${buffersDeleted} buffers + ${cacheDeleted} caché eliminados`);
-      }, 30 * 60 * 1000); // 30 minutos
+      }, 24 * 60 * 60 * 1000); // 24 horas
 
-      console.log('⏰ Limpieza automática programada cada 30 minutos\n');
+      console.log('⏰ Limpieza automática programada cada 24 horas\n');
 
       // PRE-GENERACIÓN MENSUAL: Día 1 de cada mes a las 3:00 AM
       cron.schedule('0 3 1 * *', async () => {
