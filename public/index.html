@@ -1731,8 +1731,7 @@
             }
             
             hideRetryNotification();
-            showDemoQuestion();
-            showError('No se pudo conectar. Mostrando pregunta de demostración.');
+            showError('⚠️ No se pudieron generar preguntas en este momento. El servicio está experimentando alta demanda. Por favor, recarga la página e intenta de nuevo en unos momentos.');
             return false;
         }
 
@@ -2240,52 +2239,9 @@
         }
 
         function showDemoQuestion() {
-            const demoQuestions = [
-                {
-                    question: "¿Cuál es el órgano constitucional de gobierno del Poder Judicial?",
-                    options: [
-                        "A) El Consejo General del Poder Judicial (art. 122 CE)",
-                        "B) El Ministerio de Justicia",
-                        "C) El Tribunal Supremo",
-                        "D) Las Audiencias Provinciales"
-                    ],
-                    correct: 0,
-                    explanation: "La respuesta correcta es A. El artículo 122 de la Constitución establece que el CGPJ es el órgano de gobierno del Poder Judicial.",
-                    difficulty: "media",
-                    page_reference: "Artículo 122 CE"
-                },
-                {
-                    question: "Según la Constitución, ¿cuál es el principio fundamental de la administración de justicia?",
-                    options: [
-                        "A) La justicia emana del pueblo y se administra por Jueces independientes (art. 117 CE)",
-                        "B) Los jueces dependen del Gobierno",
-                        "C) La justicia es administrada por las Comunidades Autónomas",
-                        "D) Los tribunales están subordinados al Parlamento"
-                    ],
-                    correct: 0,
-                    explanation: "Correcto: A. El artículo 117 CE establece que la justicia emana del pueblo y se administra por Jueces y Tribunales independientes.",
-                    difficulty: "media",
-                    page_reference: "Artículo 117 CE"
-                },
-                {
-                    question: "¿Cuál es el plazo general para interponer recurso de apelación según la LEC?",
-                    options: [
-                        "A) 10 días desde la notificación",
-                        "B) 20 días desde la notificación",
-                        "C) 15 días desde la notificación",
-                        "D) 30 días desde la notificación"
-                    ],
-                    correct: 1,
-                    explanation: "Correcto: B. El artículo 458 LEC establece un plazo de 20 días para interponer recurso de apelación.",
-                    difficulty: "difícil",
-                    page_reference: "Artículo 458 LEC"
-                }
-            ];
-            
-            const randomIndex = Math.floor(Math.random() * demoQuestions.length);
-            currentQuestion = demoQuestions[randomIndex];
-            
-            displayQuestion();
+            // Ya no mostramos preguntas demo - mostramos error claro
+            // Esta función se mantiene por compatibilidad pero ya no genera preguntas
+            console.error('❌ showDemoQuestion() llamada - el servicio no pudo generar preguntas');
         }
 
         function displayQuestion() {
