@@ -1326,6 +1326,34 @@ function getWeeklySummary(userId, weeks = 4) {
   }
 }
 
+/**
+ * Obtener IDs de cache de preguntas que ya están en el buffer del usuario
+ * Esto previene race conditions al rellenar el buffer en paralelo
+ * @param {number} userId - ID del usuario
+ * @param {string} topicId - ID del tema
+ * @returns {Array<number>} Array de cache IDs
+ */
+function getBufferQuestionIds(userId, topicId) {
+  const now = Date.now();
+
+  try {
+    const stmt = db.prepare(`
+      SELECT question_cache_id
+      FROM user_question_buffer
+      WHERE user_id = ?
+        AND topic_id = ?
+        AND expires_at > ?
+        AND question_cache_id IS NOT NULL
+    `);
+
+    const results = stmt.all(userId, topicId, now);
+    return results.map(r => r.question_cache_id);
+  } catch (error) {
+    console.error('Error obteniendo IDs del buffer:', error);
+    return [];
+  }
+}
+
 // ========================
 // EXPORTAR FUNCIONES
 // ========================
@@ -1369,6 +1397,7 @@ module.exports = {
   addToBuffer,
   getFromBuffer,
   getBufferSize,
+  getBufferQuestionIds,
   cleanExpiredBuffers,
   // Funciones de estadísticas semanales
   recordAnswer,

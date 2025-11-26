@@ -2687,10 +2687,11 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
  * Generar batch de preguntas (mix de caché + nuevas)
  * cacheProb aumentado a 90% para optimizar velocidad (prioriza caché)
  */
-async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.90) {
+async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.90, excludeIds = []) {
   const batchStartTime = Date.now();
   const questions = [];
-  const usedIds = []; // 🔧 FIX: Array para evitar preguntas duplicadas en el mismo batch
+  // 🔧 FIX: Inicializar con IDs a excluir + array para duplicados en el mismo batch
+  const usedIds = [...excludeIds]; // Copiar excludeIds para no mutar el array original
   const MAX_RETRIES = count * 2; // Intentar hasta el doble para asegurar al menos 1 pregunta
 
   // Obtener contenido del tema
@@ -2886,9 +2887,16 @@ async function refillBuffer(userId, topicId, count = 3) {
       return;
     }
 
+    // 🔴 FIX: Obtener IDs de preguntas que YA están en buffer para evitar duplicados por race condition
+    const existingBufferIds = db.getBufferQuestionIds(userId, topicId);
+    if (existingBufferIds.length > 0) {
+      console.log(`🔍 [Background] Excluyendo ${existingBufferIds.length} preguntas ya en buffer: [${existingBufferIds.join(', ')}]`);
+    }
+
     console.log(`🔄 [Background] Generando ${actualCount} preguntas (buffer actual: ${currentBufferSize})`);
 
-    const newQuestions = await generateQuestionBatch(userId, topicId, actualCount);
+    // 🔴 FIX: Pasar excludeIds al generar para prevenir que se seleccionen preguntas que ya están en buffer
+    const newQuestions = await generateQuestionBatch(userId, topicId, actualCount, 0.90, existingBufferIds);
 
     for (const q of newQuestions) {
       db.addToBuffer(userId, topicId, q, q.difficulty, q._cacheId || null);
