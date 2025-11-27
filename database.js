@@ -1380,7 +1380,6 @@ module.exports = {
   saveToCache,
   saveToCacheAndTrack,
   markQuestionAsSeen,
-  cleanExpiredCache,
   getCacheStats,
   updateCacheStats,
   // Funciones de buffer (prefetch)
