@@ -984,31 +984,9 @@ function markQuestionAsSeen(userId, cacheId, context = 'study') {
   }
 }
 
-/**
- * Limpiar preguntas expiradas del caché
- * @returns {number} - Cantidad de preguntas eliminadas
- */
-function cleanExpiredCache() {
-  const now = Date.now();
-
-  try {
-    const stmt = db.prepare(`
-      DELETE FROM question_cache
-      WHERE expires_at < ?
-    `);
-
-    const result = stmt.run(now);
-
-    if (result.changes > 0) {
-      console.log(`🧹 Limpieza de caché: ${result.changes} preguntas expiradas eliminadas`);
-    }
-
-    return result.changes;
-  } catch (error) {
-    console.error('Error limpiando caché:', error);
-    return 0;
-  }
-}
+// 🔴 FIX: cleanExpiredCache() eliminada - código muerto
+// Caché nunca expira por tiempo (expires_at = año 2100)
+// Solo se limpia por límite de 10,000 preguntas (elimina 1000 menos útiles)
 
 /**
  * Obtener estadísticas del caché
@@ -1207,15 +1185,38 @@ function getBufferSize(userId, topicId) {
   const now = Date.now();
 
   try {
+    // 🔴 FIX: Obtener todas las preguntas y validar JSON antes de contar
+    // Esto previene que preguntas corruptas inflen el contador
     const stmt = db.prepare(`
-      SELECT COUNT(*) as count
+      SELECT id, question_data
       FROM user_question_buffer
       WHERE user_id = ?
         AND topic_id = ?
         AND expires_at > ?
     `);
 
-    return stmt.get(userId, topicId, now).count;
+    const results = stmt.all(userId, topicId, now);
+    let validCount = 0;
+
+    for (const row of results) {
+      try {
+        const parsed = JSON.parse(row.question_data);
+        // Validar estructura mínima requerida
+        if (parsed?.question && Array.isArray(parsed.options) && parsed.options.length === 4 && typeof parsed.correct === 'number') {
+          validCount++;
+        } else {
+          // JSON válido pero estructura incorrecta - eliminar
+          console.warn(`⚠️ Estructura inválida en buffer ID ${row.id}, eliminando...`);
+          db.prepare('DELETE FROM user_question_buffer WHERE id = ?').run(row.id);
+        }
+      } catch (parseError) {
+        // JSON corrupto - eliminar automáticamente
+        console.warn(`⚠️ JSON corrupto en buffer ID ${row.id}, eliminando...`);
+        db.prepare('DELETE FROM user_question_buffer WHERE id = ?').run(row.id);
+      }
+    }
+
+    return validCount;
   } catch (error) {
     console.error('Error obteniendo tamaño del buffer:', error);
     return 0;
