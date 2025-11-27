@@ -2765,8 +2765,8 @@ async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.9
           cached.question._cacheId = cached.cacheId;
           cached.question._sourceTopic = topicId;
           batchQuestions.push(cached.question);
-          // 🔴 FIX: NO marcar como vista aquí - se marca cuando se ENTREGA al usuario
-          // db.markQuestionAsSeen se ejecuta en endpoint cuando se confirma entrega
+          // 🔴 FIX: Marcar como vista INMEDIATAMENTE al añadir al buffer (previene duplicados)
+          db.markQuestionAsSeen(userId, cached.cacheId, 'study');
           console.log(`💾 Pregunta ${questions.length + batchQuestions.length}/${count} desde caché (${difficulty}) - ID ${cached.cacheId}`);
         } else {
           break;
