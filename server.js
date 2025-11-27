@@ -809,8 +809,8 @@ function selectSpacedChunks(userId, topicId, chunks, count = 2) {
     return selected;
   }
 
-  // Calcular distancia mínima (30% del total de chunks)
-  const minDistance = Math.max(3, Math.floor(totalChunks * 0.3));
+  // Calcular distancia mínima (50% del total de chunks - mayor separación = conceptos más diversos)
+  const minDistance = Math.max(3, Math.floor(totalChunks * 0.5));
 
   // Seleccionar primer chunk aleatorio
   const firstIdx = available[Math.floor(Math.random() * available.length)];
@@ -988,6 +988,14 @@ const CLAUDE_PROMPT_SIMPLE = `Eres evaluador experto OPOSICIONES Técnico Farmac
 
 OBJETIVO: Genera 2 preguntas SIMPLES (1 por fragmento, conceptos DIFERENTES). Evalúan memorización datos objetivos.
 
+DIVERSIDAD CONCEPTUAL OBLIGATORIA:
+• Las 2 preguntas deben ser de ASPECTOS COMPLETAMENTE DIFERENTES
+• Si fragmentos hablan del MISMO concepto central:
+  - Enfoca cada pregunta en SUB-ASPECTOS radicalmente distintos
+  - Ejemplo: Si ambos hablan de "conservación medicamentos"
+    · Pregunta 1: temperatura/plazo
+    · Pregunta 2: normativa/responsabilidad
+
 === FRAGMENTO 1 ===
 {{CHUNK_1}}
 
@@ -1021,7 +1029,24 @@ INSTRUCCIONES:
    e) Precisión incorrecta: rango casi correcto con detalle erróneo
    → Requieren conocer dato exacto
 
-4. EXPLICACIÓN (IMPORTANTE):
+4. LONGITUD OPCIONES (CRÍTICO):
+   • TODAS las opciones deben tener longitud SIMILAR (±25% caracteres)
+   • Evitar opciones excesivamente largas o excesivamente cortas
+   • Variación sutil natural permitida (una ligeramente más larga/corta)
+   • Cuando existe esa variación ligera:
+     - 50% preguntas: opción CORRECTA es la más larga
+     - 50% preguntas: opción INCORRECTA es la más larga
+   • Objetivo: longitud NO debe ser pista obvia
+   • Ejemplo BIEN (todas similares, correcta es C):
+     A) "7 días entre 2-8°C" (18 chars)
+     B) "10 días temperatura ambiente" (28 chars)
+     C) "5 días refrigerado sin conservantes" (36 chars) ✓ más larga
+     D) "14 días con antioxidantes" (26 chars)
+   • Ejemplo MAL (diferencias extremas):
+     A) "7 días" (7 chars) ← DEMASIADO CORTA
+     B) "Entre 5-10 días según normativa vigente RD 1345/2007" (54 chars) ← DEMASIADO LARGA
+
+5. EXPLICACIÓN (IMPORTANTE):
    • Una explicación INDEPENDIENTE por pregunta
    • NO mencionar "Fragmento 1" ni "Fragmento 2"
    • Formato: "**Normativa/Concepto:** dato específico."
@@ -1043,6 +1068,14 @@ JSON: {"questions":[{"question":"","options":["A) ","B) ","C) ","D) "],"correct"
 const CLAUDE_PROMPT_MEDIA = `Eres evaluador experto OPOSICIONES Técnico Farmacia SERGAS.
 
 OBJETIVO: Genera 2 preguntas MEDIAS (1 por fragmento, temas DIFERENTES, máxima variedad). Evalúan comprensión y aplicación.
+
+DIVERSIDAD CONCEPTUAL OBLIGATORIA:
+• Las 2 preguntas deben ser de ASPECTOS COMPLETAMENTE DIFERENTES
+• Si fragmentos hablan del MISMO concepto central:
+  - Enfoca cada pregunta en SUB-ASPECTOS radicalmente distintos
+  - Ejemplo: Si ambos hablan de "conservación medicamentos"
+    · Pregunta 1: temperatura/plazo
+    · Pregunta 2: normativa/responsabilidad
 
 === FRAGMENTO 1 ===
 {{CHUNK_1}}
@@ -1075,7 +1108,24 @@ INSTRUCCIONES:
    g) Confusión terminológica: término similar incorrecto
    → Requieren dominio completo del concepto
 
-3. EXPLICACIÓN (IMPORTANTE):
+3. LONGITUD OPCIONES (CRÍTICO):
+   • TODAS las opciones deben tener longitud SIMILAR (±25% caracteres)
+   • Evitar opciones excesivamente largas o excesivamente cortas
+   • Variación sutil natural permitida (una ligeramente más larga/corta)
+   • Cuando existe esa variación ligera:
+     - 50% preguntas: opción CORRECTA es la más larga
+     - 50% preguntas: opción INCORRECTA es la más larga
+   • Objetivo: longitud NO debe ser pista obvia
+   • Ejemplo BIEN (todas similares, correcta es C):
+     A) "7 días entre 2-8°C" (18 chars)
+     B) "10 días temperatura ambiente" (28 chars)
+     C) "5 días refrigerado sin conservantes" (36 chars) ✓ más larga
+     D) "14 días con antioxidantes" (26 chars)
+   • Ejemplo MAL (diferencias extremas):
+     A) "7 días" (7 chars) ← DEMASIADO CORTA
+     B) "Entre 5-10 días según normativa vigente RD 1345/2007" (54 chars) ← DEMASIADO LARGA
+
+4. EXPLICACIÓN (IMPORTANTE):
    • Una explicación INDEPENDIENTE por pregunta
    • NO mencionar "Fragmento 1" ni "Fragmento 2"
    • Formato: "**Normativa/Protocolo:** dato específico."
@@ -1096,6 +1146,14 @@ JSON: {"questions":[{"question":"","options":["A) ","B) ","C) ","D) "],"correct"
 const CLAUDE_PROMPT_ELABORADA = `Eres evaluador experto OPOSICIONES Técnico Farmacia SERGAS.
 
 OBJETIVO: Genera 2 preguntas ELABORADAS (1 por fragmento, temas DIFERENTES). Requieren análisis profundo, integración conceptos, razonamiento complejo.
+
+DIVERSIDAD CONCEPTUAL OBLIGATORIA:
+• Las 2 preguntas deben ser de ASPECTOS COMPLETAMENTE DIFERENTES
+• Si fragmentos hablan del MISMO concepto central:
+  - Enfoca cada pregunta en SUB-ASPECTOS radicalmente distintos
+  - Ejemplo: Si ambos hablan de "conservación medicamentos"
+    · Pregunta 1: temperatura/plazo
+    · Pregunta 2: normativa/responsabilidad
 
 === FRAGMENTO 1 ===
 {{CHUNK_1}}
@@ -1124,7 +1182,24 @@ INSTRUCCIONES:
    g) Criterio insuficiente: solo uno de varios necesarios
    → Requieren DOMINIO PROFUNDO
 
-3. EXPLICACIÓN (IMPORTANTE - estructura avanzada):
+3. LONGITUD OPCIONES (CRÍTICO):
+   • TODAS las opciones deben tener longitud SIMILAR (±25% caracteres)
+   • Evitar opciones excesivamente largas o excesivamente cortas
+   • Variación sutil natural permitida (una ligeramente más larga/corta)
+   • Cuando existe esa variación ligera:
+     - 50% preguntas: opción CORRECTA es la más larga
+     - 50% preguntas: opción INCORRECTA es la más larga
+   • Objetivo: longitud NO debe ser pista obvia
+   • Ejemplo BIEN (todas similares, correcta es C):
+     A) "7 días entre 2-8°C" (18 chars)
+     B) "10 días temperatura ambiente" (28 chars)
+     C) "5 días refrigerado sin conservantes" (36 chars) ✓ más larga
+     D) "14 días con antioxidantes" (26 chars)
+   • Ejemplo MAL (diferencias extremas):
+     A) "7 días" (7 chars) ← DEMASIADO CORTA
+     B) "Entre 5-10 días según normativa vigente RD 1345/2007" (54 chars) ← DEMASIADO LARGA
+
+4. EXPLICACIÓN (IMPORTANTE - estructura avanzada):
    • Una explicación INDEPENDIENTE por pregunta
    • NO mencionar "Fragmento 1" ni "Fragmento 2"
    • Formato simple: "**Normativa:** dato."
@@ -3256,7 +3331,7 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
       for (let i = 0; i < simpleCallsMissing; i++) {
         const promiseFn = async () => {
           const chunk1Index = Math.floor(Math.random() * chunks.length);
-          const minDistance = Math.max(3, Math.floor(chunks.length * 0.3));
+          const minDistance = Math.max(3, Math.floor(chunks.length * 0.5));
           let chunk2Index;
           do {
             chunk2Index = Math.floor(Math.random() * chunks.length);
@@ -3287,7 +3362,7 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
       for (let i = 0; i < mediaCallsMissing; i++) {
         const promiseFn = async () => {
           const chunk1Index = Math.floor(Math.random() * chunks.length);
-          const minDistance = Math.max(3, Math.floor(chunks.length * 0.3));
+          const minDistance = Math.max(3, Math.floor(chunks.length * 0.5));
           let chunk2Index;
           do {
             chunk2Index = Math.floor(Math.random() * chunks.length);
@@ -3318,7 +3393,7 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
       for (let i = 0; i < elaboratedCallsMissing; i++) {
         const promiseFn = async () => {
           const chunk1Index = Math.floor(Math.random() * chunks.length);
-          const minDistance = Math.max(3, Math.floor(chunks.length * 0.3));
+          const minDistance = Math.max(3, Math.floor(chunks.length * 0.5));
           let chunk2Index;
           do {
             chunk2Index = Math.floor(Math.random() * chunks.length);
