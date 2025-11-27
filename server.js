@@ -1311,9 +1311,30 @@ function requireAuth(req, res, next) {
 
   // Verificar tiempo restante de sesión y renovar automáticamente si es necesario
   try {
+    // 🔴 FIX: Validar que req.session.cookie existe antes de acceder a _expires
+    if (!req.session || !req.session.cookie) {
+      console.warn('⚠️ Cookie de sesión no existe, sesión corrupta');
+      return res.status(401).json({
+        error: 'Sesión inválida',
+        requiresLogin: true,
+        message: 'Tu sesión es inválida. Por favor, inicia sesión de nuevo.'
+      });
+    }
+
     const expiresAt = req.session.cookie._expires;
     const now = Date.now();
-    const timeLeft = expiresAt ? expiresAt - now : 0;
+
+    // 🔴 FIX: Validar que _expires existe y es válido
+    if (!expiresAt) {
+      console.warn('⚠️ Cookie de sesión sin _expires, asumiendo expirada');
+      return res.status(401).json({
+        error: 'Sesión inválida',
+        requiresLogin: true,
+        message: 'Tu sesión es inválida. Por favor, inicia sesión de nuevo.'
+      });
+    }
+
+    const timeLeft = expiresAt - now;
 
     // Si quedan menos de 5 minutos, renovar sesión automáticamente
     if (timeLeft > 0 && timeLeft < 5 * 60 * 1000) {
@@ -2071,9 +2092,12 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
 
             if (tryCache) {
               console.log(`\n💾 SIMPLE [${currentTopic}] - Intentando caché (${questionsToGet} preguntas)...`);
+              const excludeIds = []; // 🔴 FIX: Prevenir duplicados en el mismo examen
+
               for (let j = 0; j < questionsToGet; j++) {
-                const cached = db.getCachedQuestion(userId, [currentTopic], 'simple');
+                const cached = db.getCachedQuestion(userId, [currentTopic], 'simple', excludeIds);
                 if (cached) {
+                  excludeIds.push(cached.cacheId); // 🔴 FIX: Excluir esta pregunta en siguientes iteraciones
                   cached.question._sourceTopic = currentTopic;
                   questions.push(cached.question);
                   db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
@@ -2153,9 +2177,12 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
 
           if (tryCache) {
             console.log(`\n💾 MEDIA [${currentTopic}] - Intentando caché (${questionsToGet} preguntas)...`);
+            const excludeIds = []; // 🔴 FIX: Prevenir duplicados en el mismo examen
+
             for (let j = 0; j < questionsToGet; j++) {
-              const cached = db.getCachedQuestion(userId, [currentTopic], 'media');
+              const cached = db.getCachedQuestion(userId, [currentTopic], 'media', excludeIds);
               if (cached) {
+                excludeIds.push(cached.cacheId); // 🔴 FIX: Excluir esta pregunta en siguientes iteraciones
                 cached.question._sourceTopic = currentTopic;
                 questions.push(cached.question);
                 db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
@@ -2235,9 +2262,12 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
 
           if (tryCache) {
             console.log(`\n💾 ELABORADA [${currentTopic}] - Intentando caché (${questionsToGet} preguntas)...`);
+            const excludeIds = []; // 🔴 FIX: Prevenir duplicados en el mismo examen
+
             for (let j = 0; j < questionsToGet; j++) {
-              const cached = db.getCachedQuestion(userId, [currentTopic], 'elaborada');
+              const cached = db.getCachedQuestion(userId, [currentTopic], 'elaborada', excludeIds);
               if (cached) {
+                excludeIds.push(cached.cacheId); // 🔴 FIX: Excluir esta pregunta en siguientes iteraciones
                 cached.question._sourceTopic = currentTopic;
                 questions.push(cached.question);
                 db.markQuestionAsSeen(userId, cached.cacheId, 'exam');
@@ -2726,15 +2756,18 @@ async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.9
     // Intentar caché primero (hasta 2 preguntas)
     if (tryCache) {
       const needed = Math.min(2, count - questions.length);
+      const excludeIds = []; // 🔴 FIX: Prevenir duplicados en el mismo batch
+
       for (let i = 0; i < needed; i++) {
-        const cached = db.getCachedQuestion(userId, [topicId], difficulty);
+        const cached = db.getCachedQuestion(userId, [topicId], difficulty, excludeIds);
         if (cached) {
+          excludeIds.push(cached.cacheId); // 🔴 FIX: Excluir esta pregunta en siguientes iteraciones
           cached.question._cacheId = cached.cacheId;
           cached.question._sourceTopic = topicId;
           batchQuestions.push(cached.question);
           // 🔴 FIX: NO marcar como vista aquí - se marca cuando se ENTREGA al usuario
           // db.markQuestionAsSeen se ejecuta en endpoint cuando se confirma entrega
-          console.log(`💾 Pregunta ${questions.length + batchQuestions.length}/${count} desde caché (${difficulty})`);
+          console.log(`💾 Pregunta ${questions.length + batchQuestions.length}/${count} desde caché (${difficulty}) - ID ${cached.cacheId}`);
         } else {
           break;
         }
@@ -3782,7 +3815,23 @@ async function startServer() {
         console.log(`✅ Limpieza completada: ${buffersDeleted} buffers eliminados`);
       }, 6 * 60 * 60 * 1000); // 6 horas
 
+      // 🔴 FIX: Limpiar documentsCache Map cada 15 minutos (previene memory leak)
+      setInterval(() => {
+        const now = Date.now();
+        let cleaned = 0;
+        for (const [key, value] of documentsCache.entries()) {
+          if (now - value.timestamp > DOCUMENT_CACHE_TTL) {
+            documentsCache.delete(key);
+            cleaned++;
+          }
+        }
+        if (cleaned > 0) {
+          console.log(`🧹 Limpieza documentsCache: ${cleaned} temas eliminados (${documentsCache.size} restantes)`);
+        }
+      }, 15 * 60 * 1000); // 15 minutos
+
       console.log('⏰ Limpieza automática de buffers cada 6 horas\n');
+      console.log('⏰ Limpieza automática de documentsCache cada 15 minutos\n');
       console.log('💾 Caché de preguntas: sin expiración por tiempo (solo límite 10,000)\n');
 
       // PRE-GENERACIÓN MENSUAL: Día 1 de cada mes a las 3:00 AM

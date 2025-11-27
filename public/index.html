@@ -2809,9 +2809,9 @@
         }
 
         async function startOfficialExam() {
-            // TIMEOUT: 20 minutos para exámenes largos (margen seguro incluso con latencia)
+            // TIMEOUT: 4.5 minutos para exámenes (sincronizado con backend 4min + 30s margen)
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 1200000); // 20 minutos
+            const timeout = setTimeout(() => controller.abort(), 270000); // 4.5 minutos (270s)
 
             try {
                 console.log(`🎓 Iniciando examen oficial: ${officialExamConfig.questionCount} preguntas`);
