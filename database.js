@@ -742,7 +742,7 @@ function getChunkCoverage(userId, topicId) {
 // ========================
 
 const NO_REPEAT_DAYS = 15; // Periodo mínimo sin repeticiones (configurable)
-const CACHE_EXPIRY_HOURS = null; // 🔴 FIX: Caché NUNCA expira por tiempo, solo por límite
+const CACHE_NEVER_EXPIRES = new Date('2100-01-01').getTime(); // 🔴 FIX: Caché nunca expira (año 2100)
 const MAX_CACHE_SIZE = 10000; // Límite máximo de preguntas en caché
 
 /**
@@ -870,7 +870,7 @@ function cleanOldCacheIfNeeded() {
  */
 function saveToCacheAndTrack(userId, topicId, difficulty, questionData, context = 'study') {
   const now = Date.now();
-  const expiresAt = null; // 🔴 FIX: Caché NUNCA expira por tiempo, solo por límite de 10,000
+  const expiresAt = CACHE_NEVER_EXPIRES; // 🔴 FIX: Nunca expira (año 2100), solo se limpia por límite
 
   // Limpiar caché si supera el límite de 10,000 preguntas (elimina 1000 menos útiles)
   cleanOldCacheIfNeeded();
@@ -926,7 +926,7 @@ function saveToCacheAndTrack(userId, topicId, difficulty, questionData, context 
  */
 function saveToCache(topicId, difficulty, questionData) {
   const now = Date.now();
-  const expiresAt = null; // 🔴 FIX: Caché NUNCA expira por tiempo, solo por límite de 10,000
+  const expiresAt = CACHE_NEVER_EXPIRES; // 🔴 FIX: Nunca expira (año 2100), solo se limpia por límite
 
   // Limpiar caché si supera el límite (elimina 1000 menos útiles)
   cleanOldCacheIfNeeded();
