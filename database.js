@@ -1093,12 +1093,25 @@ function updateCacheStats(questionsGenerated, questionsCached, totalCost) {
  */
 function addToBuffer(userId, topicId, questionData, difficulty, cacheId = null) {
   const now = Date.now();
-  const expiresAt = now + (3600 * 1000); // 1 hour expiry
+  const expiresAt = now + (6 * 3600 * 1000); // 6 horas expiry (consistente con limpieza)
 
   try {
     // Validar que questionData tiene los campos mínimos requeridos
     if (!questionData || !questionData.question || !questionData.options) {
       console.error('Error: questionData inválido en addToBuffer');
+      return null;
+    }
+
+    // 🔴 FIX: Verificar límite máximo antes de insertar (previene buffer infinito por bugs)
+    const MAX_BUFFER_SIZE = 5; // Límite: 5 preguntas por usuario+tema
+    const currentCount = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM user_question_buffer
+      WHERE user_id = ? AND topic_id = ? AND expires_at > ?
+    `).get(userId, topicId, now).count;
+
+    if (currentCount >= MAX_BUFFER_SIZE) {
+      console.warn(`⚠️ Buffer lleno para usuario ${userId}, tema ${topicId} (${currentCount}/${MAX_BUFFER_SIZE})`);
       return null;
     }
 
