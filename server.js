@@ -2380,8 +2380,8 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
         const totalCost = cacheMisses * costPerQuestion;
         db.updateCacheStats(cacheMisses, cacheHits, totalCost);
 
-        // Limpiar preguntas expiradas (cada vez que se genera un examen)
-        db.cleanExpiredCache();
+        // 🔴 FIX: cleanExpiredCache() REMOVIDO - caché nunca expira por tiempo
+        // Se limpia solo por límite de 10,000 (elimina 1000 menos útiles)
 
         return {
           examId: Date.now(),
@@ -3773,15 +3773,17 @@ async function startServer() {
       console.log('\n🎯 ¡Sistema listo para generar exámenes!');
       console.log('========================================\n');
 
-      // FASE 2: Limpiar buffers y caché expirados cada 6 horas
+      // FASE 2: Limpiar buffers expirados cada 6 horas
+      // 🔴 FIX: Caché NO se limpia por tiempo, solo por límite (10,000 → elimina 1000)
       setInterval(() => {
-        console.log('🧹 Ejecutando limpieza periódica...');
+        console.log('🧹 Ejecutando limpieza periódica de buffers...');
         const buffersDeleted = db.cleanExpiredBuffers();
-        const cacheDeleted = db.cleanExpiredCache();
-        console.log(`✅ Limpieza completada: ${buffersDeleted} buffers + ${cacheDeleted} caché eliminados`);
+        // cleanExpiredCache() REMOVIDO - caché nunca expira por tiempo
+        console.log(`✅ Limpieza completada: ${buffersDeleted} buffers eliminados`);
       }, 6 * 60 * 60 * 1000); // 6 horas
 
-      console.log('⏰ Limpieza automática programada cada 6 horas\n');
+      console.log('⏰ Limpieza automática de buffers cada 6 horas\n');
+      console.log('💾 Caché de preguntas: sin expiración por tiempo (solo límite 10,000)\n');
 
       // PRE-GENERACIÓN MENSUAL: Día 1 de cada mes a las 3:00 AM
       cron.schedule('0 3 1 * *', async () => {
