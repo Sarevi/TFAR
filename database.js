@@ -964,11 +964,12 @@ function markQuestionAsSeen(userId, cacheId, context = 'study') {
   try {
     // 🔴 FIX CRÍTICO: Usar ON CONFLICT para actualizar timestamp en vez de ignorar
     // INSERT OR IGNORE dejaba timestamps viejos, haciendo preguntas elegibles otra vez
+    // PRIMARY KEY es (user_id, question_cache_id) sin context
     const stmt = db.prepare(`
       INSERT INTO user_seen_questions (user_id, question_cache_id, seen_at, context)
       VALUES (?, ?, ?, ?)
-      ON CONFLICT(user_id, question_cache_id, context)
-      DO UPDATE SET seen_at = excluded.seen_at
+      ON CONFLICT(user_id, question_cache_id)
+      DO UPDATE SET seen_at = excluded.seen_at, context = excluded.context
     `);
 
     stmt.run(userId, cacheId, now, context);
