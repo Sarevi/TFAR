@@ -388,7 +388,7 @@ function calculateDelay(attempt, config = IMPROVED_CLAUDE_CONFIG) {
 }
 
 async function callClaudeWithImprovedRetry(fullPrompt, maxTokens = 700, questionType = 'media', questionsPerCall = 2, config = IMPROVED_CLAUDE_CONFIG) {
-  const ABSOLUTE_TIMEOUT = 180000; // 180 segundos (3 minutos) - margen para colas en horas pico
+  const ABSOLUTE_TIMEOUT = 240000; // 240 segundos (4 minutos) - margen robusto para colas + reintentos
 
   // Envolver toda la lógica de retry en un timeout absoluto
   const retryWithTimeout = Promise.race([
@@ -485,7 +485,7 @@ async function callClaudeWithImprovedRetry(fullPrompt, maxTokens = 700, question
     // Timeout absoluto
     new Promise((_, reject) =>
       setTimeout(() => {
-        console.warn('⏱️ Generación tardó más de 3 minutos (posible sobrecarga del servicio)');
+        console.warn('⏱️ Generación tardó más de 4 minutos (posible sobrecarga del servicio)');
         reject(new Error('El servicio está experimentando alta demanda. Por favor, intenta de nuevo en unos momentos.'));
       }, ABSOLUTE_TIMEOUT)
     )
@@ -2607,6 +2607,11 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
     // Primera pregunta para retornar
     questionToReturn = batchQuestions[0];
 
+    // 🔴 FIX: Marcar como vista DESPUÉS de confirmar que se va a entregar
+    if (questionToReturn._cacheId) {
+      db.markQuestionAsSeen(userId, questionToReturn._cacheId, 'study');
+    }
+
     // Segunda pregunta al buffer (si existe)
     if (batchQuestions.length > 1) {
       const q = batchQuestions[1];
@@ -2727,7 +2732,8 @@ async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.9
           cached.question._cacheId = cached.cacheId;
           cached.question._sourceTopic = topicId;
           batchQuestions.push(cached.question);
-          db.markQuestionAsSeen(userId, cached.cacheId, 'study');
+          // 🔴 FIX: NO marcar como vista aquí - se marca cuando se ENTREGA al usuario
+          // db.markQuestionAsSeen se ejecuta en endpoint cuando se confirma entrega
           console.log(`💾 Pregunta ${questions.length + batchQuestions.length}/${count} desde caché (${difficulty})`);
         } else {
           break;
@@ -2876,8 +2882,8 @@ async function refillBuffer(userId, topicId, count = 3) {
       return;
     }
 
-    // Ajustar cantidad a generar según buffer actual
-    const actualCount = Math.max(0, 3 - currentBufferSize);
+    // Ajustar cantidad a generar según buffer actual (máximo 3)
+    const actualCount = Math.min(count, Math.max(0, 3 - currentBufferSize));
 
     if (actualCount === 0) {
       console.log(`⏭️  [Background] Buffer completo, no se necesita refill`);
@@ -2888,12 +2894,21 @@ async function refillBuffer(userId, topicId, count = 3) {
 
     const newQuestions = await generateQuestionBatch(userId, topicId, actualCount);
 
+    // 🔴 FIX: addToBuffer ahora verifica límite atómicamente (previene race conditions)
+    // Si buffer se llenó mientras generábamos, addToBuffer retornará null
+    let addedCount = 0;
     for (const q of newQuestions) {
-      db.addToBuffer(userId, topicId, q, q.difficulty, q._cacheId || null);
+      const result = db.addToBuffer(userId, topicId, q, q.difficulty, q._cacheId || null);
+      if (result !== null) {
+        addedCount++;
+      } else {
+        console.log(`⏭️  Buffer lleno, descartando preguntas sobrantes (${newQuestions.length - addedCount} no añadidas)`);
+        break; // Buffer lleno, no intentar más
+      }
     }
 
     const bufferSize = db.getBufferSize(userId, topicId);
-    console.log(`✅ [Background] Buffer rellenado: ${bufferSize} preguntas`);
+    console.log(`✅ [Background] Buffer rellenado: ${bufferSize} preguntas (${addedCount} añadidas)`);
   } catch (error) {
     console.error(`❌ [Background] Error rellenando buffer:`, error);
   }
@@ -3758,15 +3773,15 @@ async function startServer() {
       console.log('\n🎯 ¡Sistema listo para generar exámenes!');
       console.log('========================================\n');
 
-      // FASE 2: Limpiar buffers y caché expirados cada 24 horas
+      // FASE 2: Limpiar buffers y caché expirados cada 6 horas
       setInterval(() => {
         console.log('🧹 Ejecutando limpieza periódica...');
         const buffersDeleted = db.cleanExpiredBuffers();
         const cacheDeleted = db.cleanExpiredCache();
         console.log(`✅ Limpieza completada: ${buffersDeleted} buffers + ${cacheDeleted} caché eliminados`);
-      }, 24 * 60 * 60 * 1000); // 24 horas
+      }, 6 * 60 * 60 * 1000); // 6 horas
 
-      console.log('⏰ Limpieza automática programada cada 24 horas\n');
+      console.log('⏰ Limpieza automática programada cada 6 horas\n');
 
       // PRE-GENERACIÓN MENSUAL: Día 1 de cada mes a las 3:00 AM
       cron.schedule('0 3 1 * *', async () => {
