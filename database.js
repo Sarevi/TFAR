@@ -742,7 +742,7 @@ function getChunkCoverage(userId, topicId) {
 // ========================
 
 const NO_REPEAT_DAYS = 15; // Periodo mínimo sin repeticiones (configurable)
-const CACHE_EXPIRY_HOURS = 720; // Expiración de preguntas en caché (30 días / 1 mes)
+const CACHE_EXPIRY_HOURS = null; // 🔴 FIX: Caché NUNCA expira por tiempo, solo por límite
 const MAX_CACHE_SIZE = 10000; // Límite máximo de preguntas en caché
 
 /**
@@ -833,7 +833,7 @@ function cleanOldCacheIfNeeded() {
 
     if (currentSize >= MAX_CACHE_SIZE) {
       // 🔴 FIX: Eliminar preguntas considerando popularidad y referencias activas
-      const deleteCount = 500;
+      const deleteCount = 1000; // Elimina 1000 menos útiles cuando llega al límite
       console.log(`🗑️ Caché lleno (${currentSize}/${MAX_CACHE_SIZE}) - Eliminando ${deleteCount} preguntas menos útiles...`);
 
       // Calcular score de prioridad: más bajo = más candidato a eliminación
@@ -870,9 +870,9 @@ function cleanOldCacheIfNeeded() {
  */
 function saveToCacheAndTrack(userId, topicId, difficulty, questionData, context = 'study') {
   const now = Date.now();
-  const expiresAt = now + (CACHE_EXPIRY_HOURS * 3600 * 1000);
+  const expiresAt = null; // 🔴 FIX: Caché NUNCA expira por tiempo, solo por límite de 10,000
 
-  // Limpiar caché si supera el límite de 10,000 preguntas
+  // Limpiar caché si supera el límite de 10,000 preguntas (elimina 1000 menos útiles)
   cleanOldCacheIfNeeded();
 
   try {
@@ -926,9 +926,9 @@ function saveToCacheAndTrack(userId, topicId, difficulty, questionData, context 
  */
 function saveToCache(topicId, difficulty, questionData) {
   const now = Date.now();
-  const expiresAt = now + (CACHE_EXPIRY_HOURS * 3600 * 1000);
+  const expiresAt = null; // 🔴 FIX: Caché NUNCA expira por tiempo, solo por límite de 10,000
 
-  // Limpiar caché si supera el límite
+  // Limpiar caché si supera el límite (elimina 1000 menos útiles)
   cleanOldCacheIfNeeded();
 
   try {
