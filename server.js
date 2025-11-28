@@ -2594,11 +2594,11 @@ app.post('/api/study/pre-warm', requireAuth, async (req, res) => {
     // Generar preguntas en background (CONTROLADO - previene duplicados)
     setImmediate(() => {
       runControlledBackgroundGeneration(userId, topicId, async () => {
-        console.log(`🔨 [Background] Pre-warming: generando 2 preguntas rápidas (cache agresivo: 95%)...`);
+        console.log(`🔨 [Background] Pre-warming: generando 2 preguntas rápidas (cache: 90%)...`);
 
         const questionsNeeded = Math.min(2, 3 - currentBufferSize);
         if (questionsNeeded > 0) {
-          const batchQuestions = await generateQuestionBatch(userId, topicId, questionsNeeded, 0.95);
+          const batchQuestions = await generateQuestionBatch(userId, topicId, questionsNeeded, 0.90);
 
           // Añadir todas al buffer
           for (const q of batchQuestions) {
@@ -2702,8 +2702,8 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
     console.log(`🔨 Buffer vacío - generando 2 preguntas (1 entrega + 1 buffer)...`);
     const startTime = Date.now();
 
-    // OPTIMIZACIÓN AGRESIVA: 98% probabilidad de caché para máxima velocidad
-    const batchQuestions = await generateQuestionBatch(userId, topicId, 2, 0.98);
+    // Caché 90-10: Balance óptimo entre velocidad y variedad
+    const batchQuestions = await generateQuestionBatch(userId, topicId, 2, 0.90);
 
     if (batchQuestions.length === 0) {
       return res.status(500).json({ error: 'No se pudieron generar preguntas' });
