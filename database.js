@@ -892,10 +892,12 @@ function saveToCacheAndTrack(userId, topicId, difficulty, questionData, context 
 
     const cacheId = result.lastInsertRowid;
 
-    // 2. Marcar como vista por este usuario
+    // 2. Marcar como vista por este usuario (ON CONFLICT para robustez)
     const trackStmt = db.prepare(`
       INSERT INTO user_seen_questions (user_id, question_cache_id, seen_at, context)
       VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id, question_cache_id)
+      DO UPDATE SET seen_at = excluded.seen_at, context = excluded.context
     `);
 
     trackStmt.run(userId, cacheId, now, context);
