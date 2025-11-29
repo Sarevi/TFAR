@@ -1196,8 +1196,8 @@
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <h2><span class="emoji">📊</span>Tu Progreso</h2>
-                    <button onclick="clearAllData()" style="background: #ef4444; color: white; border: none; padding: 8px 12px; border-radius: 6px; font-size: 0.75rem; cursor: pointer;">
-                        🗑️ Limpiar datos
+                    <button id="toggle-progress-btn" onclick="toggleProgressVisibility()" style="background: #3b82f6; color: white; border: none; padding: 8px 12px; border-radius: 6px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;">
+                        👁️ Ocultar
                     </button>
                 </div>
                 <p style="color: #6b7280; margin-top: 8px;">Revisa tu rendimiento en cada tema</p>
@@ -1975,6 +1975,7 @@
                     break;
                 case 'progress':
                     displayStats();
+                    restoreProgressVisibility();
                     break;
                 case 'review':
                     displayFailedQuestions();
@@ -2703,17 +2704,41 @@
             setTimeout(() => container.innerHTML = '', 3000);
         }
 
-        function clearAllData() {
-            if (confirm('¿Borrar todos los datos de progreso?')) {
-                localStorage.removeItem('oposicion_stats');
-                localStorage.removeItem('oposicion_failed');
-                userStats = {};
-                failedQuestions = {};
-                
-                displayStats();
-                displayFailedQuestions();
-                
-                showSuccess('Datos eliminados');
+        function toggleProgressVisibility() {
+            const statsContainer = document.getElementById('stats-container');
+            const toggleBtn = document.getElementById('toggle-progress-btn');
+            const isHidden = statsContainer.style.display === 'none';
+
+            if (isHidden) {
+                // Mostrar
+                statsContainer.style.display = 'block';
+                toggleBtn.innerHTML = '👁️ Ocultar';
+                toggleBtn.style.background = '#3b82f6';
+                localStorage.setItem('oposicion_progress_visible', 'true');
+            } else {
+                // Ocultar
+                statsContainer.style.display = 'none';
+                toggleBtn.innerHTML = '👁️ Mostrar';
+                toggleBtn.style.background = '#6b7280';
+                localStorage.setItem('oposicion_progress_visible', 'false');
+            }
+        }
+
+        // Restaurar estado de visibilidad al cargar la página
+        function restoreProgressVisibility() {
+            const isVisible = localStorage.getItem('oposicion_progress_visible');
+            const statsContainer = document.getElementById('stats-container');
+            const toggleBtn = document.getElementById('toggle-progress-btn');
+
+            // Por defecto visible si no hay preferencia guardada
+            if (isVisible === 'false') {
+                statsContainer.style.display = 'none';
+                toggleBtn.innerHTML = '👁️ Mostrar';
+                toggleBtn.style.background = '#6b7280';
+            } else {
+                statsContainer.style.display = 'block';
+                toggleBtn.innerHTML = '👁️ Ocultar';
+                toggleBtn.style.background = '#3b82f6';
             }
         }
 
