@@ -1030,21 +1030,22 @@ INSTRUCCIONES:
    → Requieren conocer dato exacto
 
 4. LONGITUD OPCIONES (CRÍTICO):
-   • TODAS las opciones deben tener longitud SIMILAR (±25% caracteres)
-   • Evitar opciones excesivamente largas o excesivamente cortas
-   • Variación sutil natural permitida (una ligeramente más larga/corta)
-   • Cuando existe esa variación ligera:
-     - 50% preguntas: opción CORRECTA es la más larga
-     - 50% preguntas: opción INCORRECTA es la más larga
-   • Objetivo: longitud NO debe ser pista obvia
-   • Ejemplo BIEN (todas similares, correcta es C):
-     A) "7 días entre 2-8°C" (18 chars)
-     B) "10 días temperatura ambiente" (28 chars)
-     C) "5 días refrigerado sin conservantes" (36 chars) ✓ más larga
-     D) "14 días con antioxidantes" (26 chars)
-   • Ejemplo MAL (diferencias extremas):
+   • TODAS las opciones deben tener longitud SIMILAR (±15-25% caracteres)
+   • Evitar diferencias OBVIAS que delaten la respuesta
+   • Diferencias sutiles naturales permitidas (una ligeramente más larga/corta)
+   • Cuando inevitablemente haya ligeras diferencias:
+     - 50% preguntas: opción ligeramente más larga es CORRECTA
+     - 50% preguntas: opción ligeramente más larga es INCORRECTA
+     - Si una opción se pasa del 25%: alternar entre correcta/incorrecta
+   • Objetivo: longitud NO es indicador fiable
+   • Ejemplo BIEN (todas ~30 chars, variación sutil):
+     A) "7 días entre 2-8°C refrigerado" (32 chars)
+     B) "10 días temperatura ambiente" (29 chars)
+     C) "5 días refrigerado sin conservantes" (37 chars) ✓ ligeramente más larga
+     D) "14 días con antioxidantes añadidos" (35 chars)
+   • Ejemplo MAL (diferencias obvias):
      A) "7 días" (7 chars) ← DEMASIADO CORTA
-     B) "Entre 5-10 días según normativa vigente RD 1345/2007" (54 chars) ← DEMASIADO LARGA
+     B) "Entre 5-10 días según normativa vigente RD 1345/2007 Art. 8.3" (63 chars) ← DEMASIADO LARGA
 
 5. EXPLICACIÓN (IMPORTANTE):
    • Una explicación INDEPENDIENTE por pregunta
@@ -1109,21 +1110,22 @@ INSTRUCCIONES:
    → Requieren dominio completo del concepto
 
 3. LONGITUD OPCIONES (CRÍTICO):
-   • TODAS las opciones deben tener longitud SIMILAR (±25% caracteres)
-   • Evitar opciones excesivamente largas o excesivamente cortas
-   • Variación sutil natural permitida (una ligeramente más larga/corta)
-   • Cuando existe esa variación ligera:
-     - 50% preguntas: opción CORRECTA es la más larga
-     - 50% preguntas: opción INCORRECTA es la más larga
-   • Objetivo: longitud NO debe ser pista obvia
-   • Ejemplo BIEN (todas similares, correcta es C):
-     A) "7 días entre 2-8°C" (18 chars)
-     B) "10 días temperatura ambiente" (28 chars)
-     C) "5 días refrigerado sin conservantes" (36 chars) ✓ más larga
-     D) "14 días con antioxidantes" (26 chars)
-   • Ejemplo MAL (diferencias extremas):
+   • TODAS las opciones deben tener longitud SIMILAR (±15-25% caracteres)
+   • Evitar diferencias OBVIAS que delaten la respuesta
+   • Diferencias sutiles naturales permitidas (una ligeramente más larga/corta)
+   • Cuando inevitablemente haya ligeras diferencias:
+     - 50% preguntas: opción ligeramente más larga es CORRECTA
+     - 50% preguntas: opción ligeramente más larga es INCORRECTA
+     - Si una opción se pasa del 25%: alternar entre correcta/incorrecta
+   • Objetivo: longitud NO es indicador fiable
+   • Ejemplo BIEN (todas ~30 chars, variación sutil):
+     A) "7 días entre 2-8°C refrigerado" (32 chars)
+     B) "10 días temperatura ambiente" (29 chars)
+     C) "5 días refrigerado sin conservantes" (37 chars) ✓ ligeramente más larga
+     D) "14 días con antioxidantes añadidos" (35 chars)
+   • Ejemplo MAL (diferencias obvias):
      A) "7 días" (7 chars) ← DEMASIADO CORTA
-     B) "Entre 5-10 días según normativa vigente RD 1345/2007" (54 chars) ← DEMASIADO LARGA
+     B) "Entre 5-10 días según normativa vigente RD 1345/2007 Art. 8.3" (63 chars) ← DEMASIADO LARGA
 
 4. EXPLICACIÓN (IMPORTANTE):
    • Una explicación INDEPENDIENTE por pregunta
@@ -1183,21 +1185,22 @@ INSTRUCCIONES:
    → Requieren DOMINIO PROFUNDO
 
 3. LONGITUD OPCIONES (CRÍTICO):
-   • TODAS las opciones deben tener longitud SIMILAR (±25% caracteres)
-   • Evitar opciones excesivamente largas o excesivamente cortas
-   • Variación sutil natural permitida (una ligeramente más larga/corta)
-   • Cuando existe esa variación ligera:
-     - 50% preguntas: opción CORRECTA es la más larga
-     - 50% preguntas: opción INCORRECTA es la más larga
-   • Objetivo: longitud NO debe ser pista obvia
-   • Ejemplo BIEN (todas similares, correcta es C):
-     A) "7 días entre 2-8°C" (18 chars)
-     B) "10 días temperatura ambiente" (28 chars)
-     C) "5 días refrigerado sin conservantes" (36 chars) ✓ más larga
-     D) "14 días con antioxidantes" (26 chars)
-   • Ejemplo MAL (diferencias extremas):
+   • TODAS las opciones deben tener longitud SIMILAR (±15-25% caracteres)
+   • Evitar diferencias OBVIAS que delaten la respuesta
+   • Diferencias sutiles naturales permitidas (una ligeramente más larga/corta)
+   • Cuando inevitablemente haya ligeras diferencias:
+     - 50% preguntas: opción ligeramente más larga es CORRECTA
+     - 50% preguntas: opción ligeramente más larga es INCORRECTA
+     - Si una opción se pasa del 25%: alternar entre correcta/incorrecta
+   • Objetivo: longitud NO es indicador fiable
+   • Ejemplo BIEN (todas ~30 chars, variación sutil):
+     A) "7 días entre 2-8°C refrigerado" (32 chars)
+     B) "10 días temperatura ambiente" (29 chars)
+     C) "5 días refrigerado sin conservantes" (37 chars) ✓ ligeramente más larga
+     D) "14 días con antioxidantes añadidos" (35 chars)
+   • Ejemplo MAL (diferencias obvias):
      A) "7 días" (7 chars) ← DEMASIADO CORTA
-     B) "Entre 5-10 días según normativa vigente RD 1345/2007" (54 chars) ← DEMASIADO LARGA
+     B) "Entre 5-10 días según normativa vigente RD 1345/2007 Art. 8.3" (63 chars) ← DEMASIADO LARGA
 
 4. EXPLICACIÓN (IMPORTANTE - estructura avanzada):
    • Una explicación INDEPENDIENTE por pregunta
