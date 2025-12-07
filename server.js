@@ -293,6 +293,16 @@ async function runControlledBackgroundGeneration(userId, topicId, generationFn) 
 
 // Configuración completa de temas - TÉCNICO DE FARMACIA
 const TOPIC_CONFIG = {
+  "tema-1-educacion-salud": {
+    "title": "TEMA 1 - EDUCACION PARA LA SALUD",
+    "description": "Educación para la Salud",
+    "files": ["TEMA 1- EDUCACION PARA LA SALUD .txt"]
+  },
+  "tema-2-higiene-infecciosas": {
+    "title": "TEMA 2 - HIGIENE Y ENFERMEDADES INFECCIOSAS",
+    "description": "Higiene y Enfermedades Infecciosas",
+    "files": ["TEMA 2- HIGIENE Y ENFERMEDADES INFECCIOSAS.txt"]
+  },
   "tema-4-organizaciones-farmaceuticas": {
     "title": "TEMA 4 - ORGANIZACIONES FARMACEUTICAS",
     "description": "Organizaciones Farmacéuticas",
@@ -372,6 +382,16 @@ const TOPIC_CONFIG = {
     "title": "TEMA 18 - PARAFARMACIA",
     "description": "Parafarmacia",
     "files": ["TEMA-18-PARAFARMACIA.txt"]
+  },
+  "tema-19-seguridad-riesgos": {
+    "title": "TEMA 19 - SEGURIDAD Y PREVENCION DE RIESGOS",
+    "description": "Seguridad y Prevención de Riesgos",
+    "files": ["TEMA 19- SEGURIDAD Y PREVENCION DE RIESGOS.txt"]
+  },
+  "tema-20-perspectiva-genero": {
+    "title": "TEMA 20 - PERSPECTIVA DE GENERO",
+    "description": "Perspectiva de Género",
+    "files": ["TEMA 20- PERSPECTIVA DE GENERO.txt"]
   }
 };
 
