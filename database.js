@@ -743,7 +743,7 @@ function getChunkCoverage(userId, topicId) {
 
 const NO_REPEAT_DAYS = 15; // Periodo mínimo sin repeticiones (configurable)
 const CACHE_NEVER_EXPIRES = new Date('2100-01-01').getTime(); // 🔴 FIX: Caché nunca expira (año 2100)
-const MAX_CACHE_SIZE = 10000; // Límite máximo de preguntas en caché
+const MAX_CACHE_SIZE = 75000; // Límite máximo de preguntas en caché (optimizado para 100-200 usuarios activos)
 
 /**
  * Buscar pregunta en caché que el usuario NO ha visto
