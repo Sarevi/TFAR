@@ -3927,10 +3927,10 @@ async function startServer() {
 
       console.log('⏰ Limpieza automática de buffers cada 6 horas\n');
       console.log('⏰ Limpieza automática de documentsCache cada 15 minutos\n');
-      console.log('💾 Caché de preguntas: sin expiración por tiempo (solo límite 10,000)\n');
+      console.log('💾 Caché de preguntas: sin expiración por tiempo (solo límite 75,000)\n');
 
       // PRE-GENERACIÓN MENSUAL: DESHABILITADO - Ejecutar manualmente si es necesario
-      // El caché persiste indefinidamente (expires_at = año 2100, max 10,000 preguntas)
+      // El caché persiste indefinidamente (expires_at = año 2100, max 75,000 preguntas)
       // Para ejecutar manualmente, llamar a preGenerateMonthlyCache() desde Node.js
       /*
       cron.schedule('0 3 1 * *', async () => {
