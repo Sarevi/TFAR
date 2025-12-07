@@ -3909,7 +3909,10 @@ async function startServer() {
       console.log('⏰ Limpieza automática de documentsCache cada 15 minutos\n');
       console.log('💾 Caché de preguntas: sin expiración por tiempo (solo límite 10,000)\n');
 
-      // PRE-GENERACIÓN MENSUAL: Día 1 de cada mes a las 3:00 AM
+      // PRE-GENERACIÓN MENSUAL: DESHABILITADO - Ejecutar manualmente si es necesario
+      // El caché persiste indefinidamente (expires_at = año 2100, max 10,000 preguntas)
+      // Para ejecutar manualmente, llamar a preGenerateMonthlyCache() desde Node.js
+      /*
       cron.schedule('0 3 1 * *', async () => {
         console.log('📅 Cron: Iniciando pre-generación mensual...');
         try {
@@ -3920,8 +3923,9 @@ async function startServer() {
       }, {
         timezone: "Europe/Madrid"  // Ajusta a tu zona horaria
       });
+      */
 
-      console.log('📅 Pre-generación mensual programada: Día 1 a las 3:00 AM\n');
+      console.log('📅 Pre-generación mensual: DESHABILITADA (caché persiste indefinidamente)\n');
     });
     
   } catch (error) {
