@@ -821,6 +821,107 @@ function getCachedQuestion(userId, topicIds, difficulty, excludeIds = []) {
 }
 
 /**
+ * FALLBACK: Buscar CUALQUIER pregunta en caché ignorando la ventana de 15 días.
+ * Solo se debe usar como último recurso cuando la generación falla,
+ * para evitar mostrar error al usuario. Prioriza preguntas vistas hace más tiempo.
+ * @param {number} userId - ID del usuario
+ * @param {string|string[]} topicIds - ID del tema o array de IDs de temas
+ * @param {string|null} difficulty - Dificultad deseada (null = cualquiera)
+ * @param {number[]} excludeIds - IDs de preguntas a excluir
+ * @returns {object|null}
+ */
+function getCachedQuestionFallback(userId, topicIds, difficulty = null, excludeIds = []) {
+  const topicArray = Array.isArray(topicIds) ? topicIds : [topicIds];
+  if (topicArray.length === 0) return null;
+
+  try {
+    const validTopicPattern = /^[a-z0-9-]+$/;
+    if (!topicArray.every(t => typeof t === 'string' && validTopicPattern.test(t))) {
+      console.error('⚠️ topicIds inválidos en fallback:', topicArray);
+      return null;
+    }
+
+    const placeholders = topicArray.map(() => '?').join(',');
+    const difficultyCondition = difficulty ? 'AND qc.difficulty = ?' : '';
+    let excludeCondition = '';
+    if (excludeIds.length > 0) {
+      const excludePlaceholders = excludeIds.map(() => '?').join(',');
+      excludeCondition = `AND qc.id NOT IN (${excludePlaceholders})`;
+    }
+
+    // Priorizar: 1) nunca vistas por este usuario, 2) vistas hace más tiempo
+    const stmt = db.prepare(`
+      SELECT qc.id, qc.question_data, qc.topic_id,
+             COALESCE(usq.seen_at, 0) AS last_seen
+      FROM question_cache qc
+      LEFT JOIN user_seen_questions usq
+        ON qc.id = usq.question_cache_id AND usq.user_id = ?
+      WHERE qc.topic_id IN (${placeholders})
+        ${difficultyCondition}
+        ${excludeCondition}
+      ORDER BY last_seen ASC, RANDOM()
+      LIMIT 1
+    `);
+
+    const params = [userId, ...topicArray];
+    if (difficulty) params.push(difficulty);
+    params.push(...excludeIds);
+    const result = stmt.get(...params);
+
+    if (result) {
+      console.log(`🆘 Fallback caché: pregunta ${result.id} (tema ${result.topic_id})`);
+      return {
+        cacheId: result.id,
+        topicId: result.topic_id,
+        question: JSON.parse(result.question_data)
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error en fallback de caché:', error);
+    return null;
+  }
+}
+
+/**
+ * Obtener textos de las preguntas recientes vistas por el usuario para un tema.
+ * Se usa para inyectar en el prompt y evitar repetir conceptos.
+ * @param {number} userId
+ * @param {string} topicId
+ * @param {number} limit - Cuántas preguntas recientes devolver
+ * @returns {string[]} - Array de textos de preguntas
+ */
+function getRecentQuestionTexts(userId, topicId, limit = 10) {
+  try {
+    const validTopicPattern = /^[a-z0-9-]+$/;
+    if (!validTopicPattern.test(topicId)) return [];
+
+    const stmt = db.prepare(`
+      SELECT qc.question_data
+      FROM user_seen_questions usq
+      JOIN question_cache qc ON qc.id = usq.question_cache_id
+      WHERE usq.user_id = ? AND qc.topic_id = ?
+      ORDER BY usq.seen_at DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(userId, topicId, limit);
+    return rows
+      .map(r => {
+        try {
+          const data = JSON.parse(r.question_data);
+          return data.question || '';
+        } catch {
+          return '';
+        }
+      })
+      .filter(t => t && t.length > 0);
+  } catch (error) {
+    console.error('Error obteniendo preguntas recientes:', error);
+    return [];
+  }
+}
+
+/**
  * Limpiar caché antiguo si supera el límite de 10,000 preguntas
  * Elimina las preguntas más antiguas (FIFO)
  */
@@ -1380,6 +1481,8 @@ module.exports = {
   getChunkCoverage,
   // Funciones de caché
   getCachedQuestion,
+  getCachedQuestionFallback,
+  getRecentQuestionTexts,
   saveToCache,
   saveToCacheAndTrack,
   markQuestionAsSeen,

@@ -1106,12 +1106,12 @@
             </button>
         </nav>
 
-        <!-- NOTIFICACIÓN DE REINTENTOS -->
+        <!-- NOTIFICACIÓN DE PREPARACIÓN (antes "de reintentos") -->
         <div id="retry-notification" class="retry-notification">
-            <div class="icon">🔄</div>
+            <div class="icon">⏳</div>
             <div class="content">
-                <div class="title">Reintentando generar pregunta...</div>
-                <div class="message" id="retry-message">Claude está temporalmente ocupado. La aplicación reintentará automáticamente.</div>
+                <div class="title">Preparando siguiente pregunta...</div>
+                <div class="message" id="retry-message">Estamos seleccionando una pregunta para ti. Un momento...</div>
                 <div class="retry-progress">
                     <div class="retry-progress-bar" id="retry-progress-bar"></div>
                 </div>
@@ -1644,10 +1644,11 @@
             const notification = document.getElementById('retry-notification');
             const messageElement = document.getElementById('retry-message');
             const progressBar = document.getElementById('retry-progress-bar');
-            
+
             notification.classList.add('active');
-            messageElement.textContent = `${message} (Intento ${attempt}/${maxAttempts})`;
-            
+            // Mensaje amable sin mostrar "Intento X/Y" para no alarmar al usuario.
+            messageElement.textContent = message;
+
             const progressPercentage = (attempt / maxAttempts) * 100;
             progressBar.style.width = `${progressPercentage}%`;
         }
@@ -1660,16 +1661,21 @@
 
         async function generateQuestionWithRetry() {
             retryAttempt = 0;
-            
+
             while (retryAttempt < maxRetryAttempts) {
                 retryAttempt++;
-                
-                if (retryAttempt > 1) {
-                    showRetryNotification(retryAttempt, maxRetryAttempts, 'Reintentando...');
-                    const waitTime = Math.min(2000 * Math.pow(2, retryAttempt - 2), 10000);
+
+                // El primer intento NUNCA muestra "reintentando": es silencioso para no alarmar.
+                // A partir del 2º intento se muestra una notificación discreta mientras esperamos.
+                if (retryAttempt === 2) {
+                    showRetryNotification(retryAttempt, maxRetryAttempts, 'Preparando pregunta');
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                } else if (retryAttempt > 2) {
+                    showRetryNotification(retryAttempt, maxRetryAttempts, 'Estamos tardando un poco');
+                    const waitTime = Math.min(2000 * Math.pow(2, retryAttempt - 2), 8000);
                     await new Promise(resolve => setTimeout(resolve, waitTime));
                 }
-                
+
                 try {
                     // FASE 2: Usar endpoint con prefetch para respuestas instantáneas
                     const response = await fetch(`${API_BASE}/api/study/question`, {
@@ -1701,7 +1707,9 @@
                             if (data.source === 'buffer') {
                                 console.log('⚡ Pregunta INSTANTÁNEA desde buffer');
                             } else if (data.source === 'generated') {
-                                console.log('🔨 Batch de 5 preguntas generado');
+                                console.log('🔨 Batch de preguntas generado');
+                            } else if (data.source === 'fallback') {
+                                console.log('🆘 Pregunta servida desde fallback de caché');
                             }
                             console.log(`💾 Buffer: ${data.bufferSize} preguntas listas`);
 
@@ -1710,26 +1718,18 @@
                             return true;
                         }
                     } else if (response.status === 503 || response.status === 429) {
-                        const errorData = await response.json();
-                        console.log(`⏳ Error ${response.status}: ${errorData.error}`);
-
-                        if (retryAttempt < maxRetryAttempts) {
-                            showRetryNotification(retryAttempt, maxRetryAttempts, errorData.error || 'Servidor ocupado');
-                            continue;
-                        }
+                        const errorData = await response.json().catch(() => ({}));
+                        console.log(`⏳ Error ${response.status}: ${errorData.error || 'Servidor ocupado'}`);
+                        if (retryAttempt < maxRetryAttempts) continue;
                     } else {
                         throw new Error(`Error ${response.status}: ${response.statusText}`);
                     }
                 } catch (error) {
                     console.error(`❌ Intento ${retryAttempt} fallido:`, error);
-                    
-                    if (retryAttempt < maxRetryAttempts) {
-                        showRetryNotification(retryAttempt, maxRetryAttempts, 'Error de conexión');
-                        continue;
-                    }
+                    if (retryAttempt < maxRetryAttempts) continue;
                 }
             }
-            
+
             hideRetryNotification();
             showError('⚠️ No se pudieron generar preguntas en este momento. El servicio está experimentando alta demanda. Por favor, recarga la página e intenta de nuevo en unos momentos.');
             return false;

@@ -222,11 +222,17 @@ const IMPROVED_CLAUDE_CONFIG = {
   jitterFactor: 0.1          // Jitter moderado
 };
 
+// CONFIGURACIÓN DEL BUFFER DE PREGUNTAS
+// Buffer más grande = menos probabilidad de que el usuario vea "Reintentando..."
+const BUFFER_TARGET_SIZE = 5;       // Tamaño objetivo del buffer (antes 3)
+const BUFFER_REFILL_TRIGGER = 4;    // Rellenar en cuanto baja de 4
+
 // CONFIGURACIÓN DE TEMPERATURA VARIABLE POR DIFICULTAD
+// Valores ligeramente más altos para aumentar variedad y evitar repetición de conceptos
 const TEMPERATURE_CONFIG = {
-  'simple': 0.3,      // Más determinista (datos precisos)
-  'media': 0.5,       // Balance
-  'elaborada': 0.7    // Más creativa (casos complejos)
+  'simple': 0.5,      // Balance determinismo/variedad (antes 0.3)
+  'media': 0.7,       // Más variedad en aplicación práctica (antes 0.5)
+  'elaborada': 0.85   // Mayor creatividad en casos complejos (antes 0.7)
 };
 
 // CONFIGURACIÓN DE TOKENS OPTIMIZADA (2 preguntas por llamada)
@@ -1001,20 +1007,91 @@ function parseClaudeResponse(responseText) {
   }
 }
 
+// ========================
+// SISTEMA DE DIVERSIDAD EN PROMPTS
+// ========================
+// Ángulos rotatorios para forzar variedad entre lotes sucesivos del mismo tema.
+// En cada llamada a Claude se inyecta UNO al azar para sesgar el enfoque.
+const DIVERSITY_ANGLES = [
+  'normativa y legislación aplicable (leyes, RD, decretos, artículos)',
+  'plazos, fechas, tiempos y periodos de validez',
+  'porcentajes, cantidades, concentraciones y valores numéricos',
+  'procedimientos paso a paso y secuencias operativas',
+  'responsabilidades profesionales y competencias del técnico',
+  'excepciones, casos especiales y contraindicaciones',
+  'clasificaciones, categorías y tipologías',
+  'criterios de decisión y toma de decisiones clínicas',
+  'condiciones de almacenamiento, conservación y estabilidad',
+  'seguridad, prevención de riesgos y medidas de protección',
+  'etiquetado, identificación e información al usuario',
+  'documentación, registros y trazabilidad',
+  'diferencias conceptuales y matices terminológicos',
+  'consecuencias, implicaciones y efectos derivados',
+  'requisitos técnicos, materiales e instrumentación necesaria',
+  'interacciones, incompatibilidades y contraindicaciones',
+  'control de calidad, verificación y validación',
+  'situaciones de error, incidencias y su gestión'
+];
+
+function pickDiversityAngle() {
+  return DIVERSITY_ANGLES[Math.floor(Math.random() * DIVERSITY_ANGLES.length)];
+}
+
+/**
+ * Construye la sección "PREGUNTAS RECIENTES A EVITAR" que se inyecta en el prompt.
+ * Si no hay preguntas recientes, devuelve cadena vacía (no ruido en el prompt).
+ */
+function buildRecentQuestionsSection(recentTexts) {
+  if (!recentTexts || recentTexts.length === 0) return '';
+  const trimmed = recentTexts
+    .slice(0, 8)
+    .map(t => {
+      const clean = t.replace(/\s+/g, ' ').trim();
+      return clean.length > 180 ? clean.substring(0, 180) + '…' : clean;
+    })
+    .map(t => `• ${t}`)
+    .join('\n');
+  return `\nPREGUNTAS RECIENTES DEL USUARIO (NO REPITAS CONCEPTO, ENFOQUE NI FORMA):\n${trimmed}\n`;
+}
+
+/**
+ * Renderiza un prompt sustituyendo todos los placeholders (chunks + diversidad).
+ * userId y topicId son opcionales: si están disponibles se consultan preguntas recientes
+ * del usuario para ese tema y se inyectan como "EVITAR REPETIR".
+ */
+function renderPrompt(promptTemplate, chunk1, chunk2, userId = null, topicId = null) {
+  const diversityAngle = pickDiversityAngle();
+  let recentQuestionsSection = '';
+  if (userId && topicId) {
+    try {
+      const recentTexts = db.getRecentQuestionTexts(userId, topicId, 8);
+      recentQuestionsSection = buildRecentQuestionsSection(recentTexts);
+    } catch (err) {
+      console.warn('⚠️ No se pudieron obtener preguntas recientes:', err.message);
+    }
+  }
+  return promptTemplate
+    .replace('{{CHUNK_1}}', chunk1)
+    .replace('{{CHUNK_2}}', chunk2)
+    .replace('{{DIVERSITY_ANGLE}}', diversityAngle)
+    .replace('{{RECENT_QUESTIONS}}', recentQuestionsSection);
+}
+
 // PROMPTS OPTIMIZADOS - 3 NIVELES: Simple (20%), Media (60%), Elaborada (20%)
 
 // PROMPT SIMPLE (20% - Genera 2 preguntas, 1 por fragmento) - PREGUNTAS DIRECTAS
 const CLAUDE_PROMPT_SIMPLE = `Eres evaluador experto OPOSICIONES Técnico Farmacia SERGAS.
 
-OBJETIVO: Genera 2 preguntas SIMPLES (1 por fragmento, conceptos DIFERENTES). Evalúan memorización datos objetivos.
+OBJETIVO: Genera 2 preguntas SIMPLES (1 por fragmento, conceptos DIFERENTES). Evalúan memorización de datos objetivos EXTRAÍDOS LITERALMENTE del fragmento.
 
+🎯 ÁNGULO DE ESTE LOTE (obligatorio aplicar al menos a 1 de las 2 preguntas):
+{{DIVERSITY_ANGLE}}
+{{RECENT_QUESTIONS}}
 DIVERSIDAD CONCEPTUAL OBLIGATORIA:
-• Las 2 preguntas deben ser de ASPECTOS COMPLETAMENTE DIFERENTES
-• Si fragmentos hablan del MISMO concepto central:
-  - Enfoca cada pregunta en SUB-ASPECTOS radicalmente distintos
-  - Ejemplo: Si ambos hablan de "conservación medicamentos"
-    · Pregunta 1: temperatura/plazo
-    · Pregunta 2: normativa/responsabilidad
+• Las 2 preguntas deben tratar ASPECTOS COMPLETAMENTE DIFERENTES del contenido
+• PROHIBIDO repetir el mismo concepto, la misma entidad o el mismo verbo principal en ambas preguntas
+• Si los dos fragmentos hablan del MISMO concepto central, enfoca cada pregunta en sub-aspectos radicalmente distintos (ej: temperatura vs normativa; responsabilidad vs procedimiento)
+• PROHIBIDO replicar conceptos/formulaciones de las "PREGUNTAS RECIENTES" listadas arriba (si las hay)
 
 === FRAGMENTO 1 ===
 {{CHUNK_1}}
@@ -1022,7 +1099,40 @@ DIVERSIDAD CONCEPTUAL OBLIGATORIA:
 === FRAGMENTO 2 ===
 {{CHUNK_2}}
 
-EJEMPLO:
+CALIDAD EXIGIDA:
+• La pregunta debe apoyarse en un DATO ESPECÍFICO presente en el fragmento (cifra, artículo, nombre propio, plazo, porcentaje, término técnico concreto)
+• PROHIBIDO hacer preguntas genéricas tipo "¿Qué es X?" o "¿Para qué sirve Y?" si el fragmento permite algo más preciso
+• PROHIBIDO inventar datos ausentes del fragmento
+• La referencia (page_reference) debe citar artículo/sección/norma concreta del fragmento
+
+ESTILO DE REDACCIÓN (VARÍA entre las 2 preguntas):
+   • Variante A (directa normativa): "¿Cuál/Qué [dato] establece [normativa]?"
+   • Variante B (con contexto breve 6-10 palabras): "En [situación], ¿qué [dato/plazo/requisito] aplica?"
+   • Variante C (identificación): "¿Cuál de las siguientes [características/requisitos] corresponde a [entidad]?"
+   • Variante D (excepción): "¿Cuál NO es [característica/requisito] de [entidad]?"
+   • Las 2 preguntas deben usar variantes DIFERENTES
+   • PROHIBIDO narrativas ficticias ("Un técnico...", "Recibes...")
+
+DISTRACTORES SOFISTICADOS (5 trampas, usa 2-3 diferentes en cada pregunta):
+   a) Error contexto cercano: dato correcto de OTRO caso relacionado del mismo tema
+   b) Error numérico: cifra próxima al valor correcto
+   c) Mezcla conceptual: elementos de dos situaciones reales
+   d) Error común del alumno: "suena lógico" pero es incorrecto
+   e) Precisión incorrecta: rango casi correcto con un detalle erróneo
+   → Los 3 distractores deben ser PLAUSIBLES y requerir conocer el dato exacto
+
+LONGITUD OPCIONES (CRÍTICO):
+   • TODAS las opciones con longitud SIMILAR (±25% caracteres)
+   • Ligera variación permitida, alternando (50/50) si la correcta es la más larga o la más corta
+   • La longitud NUNCA debe ser pista
+
+EXPLICACIÓN (una INDEPENDIENTE por pregunta):
+   • Formato: "**Normativa/Concepto:** dato específico."
+   • Máximo 12 palabras en el dato
+   • NO mencionar "Fragmento 1" ni "Fragmento 2"
+   • 💡 Añadir "*Razón:* porqué" (máx 5 palabras) SOLO si aporta contexto NUEVO (riesgo, implicación clínica). NUNCA repetir la información ya dada
+
+EJEMPLO VÁLIDO:
 {
   "question": "¿Cuál es el plazo máximo de validez de fórmulas magistrales acuosas sin conservantes según RD 1345/2007?",
   "options": ["A) 7 días condiciones normales", "B) 7 días entre 2-8°C", "C) 10 días entre 2-8°C con conservantes", "D) 5 días entre 2-8°C sin conservantes"],
@@ -1032,70 +1142,21 @@ EJEMPLO:
   "page_reference": "RD 1345/2007 Art. 8.3"
 }
 
-INSTRUCCIONES:
-
-1. ESTILO (varía 50/50):
-   • Directa: "¿Cuál/Qué [dato] según [normativa]?"
-   • Con contexto breve (máx 6-8 palabras): "En [situación], ¿qué [dato]?"
-   • NO narrativas ("Un técnico..." ✗), NO contexto si pregunta clara sin él
-
-2. IDENTIFICA: Plazos, temperaturas, rangos, definiciones, porcentajes, clasificaciones
-
-3. DISTRACTORES SOFISTICADOS (5 trampas):
-   a) Error contexto cercano: dato correcto de OTRO caso relacionado
-   b) Error numérico: cifra próxima + contexto correcto
-   c) Mezcla conceptual: elementos de dos situaciones
-   d) Error común: "suena lógico" pero incorrecto
-   e) Precisión incorrecta: rango casi correcto con detalle erróneo
-   → Requieren conocer dato exacto
-
-4. LONGITUD OPCIONES (CRÍTICO):
-   • TODAS las opciones deben tener longitud SIMILAR (±25% caracteres)
-   • Evitar opciones excesivamente largas o excesivamente cortas
-   • Variación sutil natural permitida (una ligeramente más larga/corta)
-   • Cuando existe esa variación ligera:
-     - 50% preguntas: opción CORRECTA es la más larga
-     - 50% preguntas: opción INCORRECTA es la más larga
-   • Objetivo: longitud NO debe ser pista obvia
-   • Ejemplo BIEN (todas similares, correcta es C):
-     A) "7 días entre 2-8°C" (18 chars)
-     B) "10 días temperatura ambiente" (28 chars)
-     C) "5 días refrigerado sin conservantes" (36 chars) ✓ más larga
-     D) "14 días con antioxidantes" (26 chars)
-   • Ejemplo MAL (diferencias extremas):
-     A) "7 días" (7 chars) ← DEMASIADO CORTA
-     B) "Entre 5-10 días según normativa vigente RD 1345/2007" (54 chars) ← DEMASIADO LARGA
-
-5. EXPLICACIÓN (IMPORTANTE):
-   • Una explicación INDEPENDIENTE por pregunta
-   • NO mencionar "Fragmento 1" ni "Fragmento 2"
-   • Formato: "**Normativa/Concepto:** dato específico."
-   • Máximo 12 palabras en dato
-   • 💡 **Incluir razón** si añade contexto útil (riesgo, implicación clínica, porqué importante): "\n\n💡 *Razón:* porqué" (máx 5 palabras)
-   • **NO incluir razón** si solo repite lo ya dicho en otras palabras
-   • Ejemplo CON razón útil: "**RD 1345/2007 Art. 8.3:** 7 días máx entre 2-8°C.\n\n💡 *Razón:* Riesgo microbiano sin conservantes."
-   • Ejemplo SIN razón (redundante): "**Ley 29/2006 Art. 5:** Garantizar medicamentos seguros." (NO añadir "💡 Razón: Para seguridad del paciente" porque es redundante)
-
-CRÍTICO:
-• Respuesta correcta del fragmento (NO inventar)
-• Cada pregunta tiene su PROPIA explicación (NO combinar)
-• Distractores plausibles incorrectos (inventar estratégicamente)
-• NO auto-referencias, NO narrativas
-
-JSON: {"questions":[{"question":"","options":["A) ","B) ","C) ","D) "],"correct":0,"explanation":"","difficulty":"simple","page_reference":""}]}`;
+JSON ESTRICTO: {"questions":[{"question":"","options":["A) ","B) ","C) ","D) "],"correct":0,"explanation":"","difficulty":"simple","page_reference":""}]}`;
 
 // PROMPT MEDIA (60% - Genera 2 preguntas, 1 por fragmento) - NIVEL INTERMEDIO
 const CLAUDE_PROMPT_MEDIA = `Eres evaluador experto OPOSICIONES Técnico Farmacia SERGAS.
 
-OBJETIVO: Genera 2 preguntas MEDIAS (1 por fragmento, temas DIFERENTES, máxima variedad). Evalúan comprensión y aplicación.
+OBJETIVO: Genera 2 preguntas MEDIAS (1 por fragmento, TIPOS y CONCEPTOS DIFERENTES). Evalúan comprensión y aplicación, NO memorización literal.
 
+🎯 ÁNGULO DE ESTE LOTE (obligatorio aplicar al menos a 1 de las 2 preguntas):
+{{DIVERSITY_ANGLE}}
+{{RECENT_QUESTIONS}}
 DIVERSIDAD CONCEPTUAL OBLIGATORIA:
-• Las 2 preguntas deben ser de ASPECTOS COMPLETAMENTE DIFERENTES
-• Si fragmentos hablan del MISMO concepto central:
-  - Enfoca cada pregunta en SUB-ASPECTOS radicalmente distintos
-  - Ejemplo: Si ambos hablan de "conservación medicamentos"
-    · Pregunta 1: temperatura/plazo
-    · Pregunta 2: normativa/responsabilidad
+• Las 2 preguntas deben abordar ASPECTOS COMPLETAMENTE DIFERENTES del contenido
+• PROHIBIDO repetir el mismo concepto central, la misma entidad o el mismo verbo principal en ambas preguntas
+• PROHIBIDO replicar conceptos/formulaciones de las "PREGUNTAS RECIENTES" listadas arriba (si las hay)
+• Ambas preguntas deben usar TIPOS DIFERENTES de la lista de 15 (ver abajo)
 
 === FRAGMENTO 1 ===
 {{CHUNK_1}}
@@ -1103,77 +1164,65 @@ DIVERSIDAD CONCEPTUAL OBLIGATORIA:
 === FRAGMENTO 2 ===
 {{CHUNK_2}}
 
-15 TIPOS (USA VARIEDAD):
+15 TIPOS DE PREGUNTA (elige 2 DIFERENTES, uno para cada fragmento):
 A-DESCRIPTIVAS: 1)Características/Propiedades 2)Funciones/Objetivos 3)Requisitos/Condiciones
-B-PROCEDIMENTALES: 4)Procedimientos/Protocolos 5)Secuencias 6)Criterios decisión
+B-PROCEDIMENTALES: 4)Procedimientos/Protocolos 5)Secuencias 6)Criterios de decisión
 C-ANALÍTICAS: 7)Clasificaciones 8)Comparaciones/Diferencias 9)Causa-Efecto
-D-APLICATIVAS: 10)Aplicación normativa 11)Indicaciones/Contraindicaciones 12)Identificación errores
-E-EVALUATIVAS: 13)Interpretación datos 14)Priorización 15)Excepciones
+D-APLICATIVAS: 10)Aplicación normativa 11)Indicaciones/Contraindicaciones 12)Identificación de errores
+E-EVALUATIVAS: 13)Interpretación de datos 14)Priorización 15)Excepciones
 
-INSTRUCCIONES:
+CALIDAD EXIGIDA:
+• Cada pregunta debe exigir COMPRENSIÓN (no solo recuerdo) - aplicar, comparar, interpretar, decidir
+• Apoyarse en DATOS ESPECÍFICOS del fragmento: artículos, plazos, porcentajes, términos técnicos propios, nombres de protocolos
+• PROHIBIDO preguntas vagas tipo "¿Qué es...?" o "¿Para qué sirve...?"
+• PROHIBIDO inventar datos que no estén en el fragmento
+• page_reference debe citar artículo/sección/protocolo concreto
 
-1. ESTILO (varía constantemente):
-   • 40% directa: "¿Qué/Cómo [aspecto] según [normativa]?"
-   • 40% contexto breve (máx 8-10 palabras): "En [situación], ¿qué...?"
-   • 20% aplicativa: "Si [condición], ¿qué [consecuencia]?"
-   • NO narrativas, NO contexto si pregunta clara sin él
+ESTILO DE REDACCIÓN (VARÍA entre las 2 preguntas):
+   • Variante A (directa normativa): "¿Qué/Cómo [aspecto] establece [normativa/protocolo]?"
+   • Variante B (contexto breve 8-12 palabras): "En [situación concreta], ¿qué [aspecto] se aplica?"
+   • Variante C (condicional/aplicativa): "Si [condición realista], ¿qué [consecuencia/acción] corresponde?"
+   • Variante D (negativa): "¿Cuál de las siguientes NO forma parte de [concepto]?"
+   • Variante E (ordenación): "¿En qué orden se realiza [proceso]?"
+   • Las 2 preguntas deben usar variantes DIFERENTES
+   • PROHIBIDO narrativas ficticias ("Un técnico...", "Recibes...")
 
-2. DISTRACTORES SOFISTICADOS (7 tipos):
-   a) Respuesta parcial: omite elemento crítico
-   b) Procedimiento contexto relacionado: de OTRO protocolo similar
-   c) Exceso/defecto requisitos: intensidad inadecuada
-   d) Mezcla elementos: partes de dos procedimientos
-   e) Inversión orden lógico: secuencia equivocada
-   f) Error ámbito normativo: norma de contexto diferente
-   g) Confusión terminológica: término similar incorrecto
-   → Requieren dominio completo del concepto
+DISTRACTORES SOFISTICADOS (7 tipos, usa 2-3 diferentes por pregunta):
+   a) Respuesta parcial: correcta pero omite un elemento crítico
+   b) Procedimiento relacionado: pasos de OTRO protocolo parecido
+   c) Exceso/defecto de requisitos: intensidad o alcance inadecuados
+   d) Mezcla de elementos: fragmentos de dos procedimientos distintos
+   e) Inversión del orden lógico: secuencia equivocada
+   f) Error de ámbito normativo: norma correcta pero de contexto distinto
+   g) Confusión terminológica: término similar pero incorrecto
+   → Requieren dominio completo, NO deducibles por sentido común
 
-3. LONGITUD OPCIONES (CRÍTICO):
-   • TODAS las opciones deben tener longitud SIMILAR (±25% caracteres)
-   • Evitar opciones excesivamente largas o excesivamente cortas
-   • Variación sutil natural permitida (una ligeramente más larga/corta)
-   • Cuando existe esa variación ligera:
-     - 50% preguntas: opción CORRECTA es la más larga
-     - 50% preguntas: opción INCORRECTA es la más larga
-   • Objetivo: longitud NO debe ser pista obvia
-   • Ejemplo BIEN (todas similares, correcta es C):
-     A) "7 días entre 2-8°C" (18 chars)
-     B) "10 días temperatura ambiente" (28 chars)
-     C) "5 días refrigerado sin conservantes" (36 chars) ✓ más larga
-     D) "14 días con antioxidantes" (26 chars)
-   • Ejemplo MAL (diferencias extremas):
-     A) "7 días" (7 chars) ← DEMASIADO CORTA
-     B) "Entre 5-10 días según normativa vigente RD 1345/2007" (54 chars) ← DEMASIADO LARGA
+LONGITUD OPCIONES (CRÍTICO):
+   • TODAS similares (±25% caracteres)
+   • Ligera variación permitida alternando (50/50) si la correcta es la más larga o la más corta
+   • La longitud NUNCA debe ser pista
 
-4. EXPLICACIÓN (IMPORTANTE):
-   • Una explicación INDEPENDIENTE por pregunta
-   • NO mencionar "Fragmento 1" ni "Fragmento 2"
+EXPLICACIÓN (una INDEPENDIENTE por pregunta):
    • Formato: "**Normativa/Protocolo:** dato específico."
-   • Máximo 13 palabras en dato
-   • 💡 **Incluir razón** si añade contexto útil (lógica operativa, implicación práctica, porqué importante): "\n\n💡 *Razón:* porqué" (máx 6 palabras)
-   • **NO incluir razón** si solo repite lo dicho con otras palabras
+   • Máximo 13 palabras en el dato
+   • NO mencionar "Fragmento 1" ni "Fragmento 2"
+   • 💡 "*Razón:* porqué" (máx 6 palabras) SOLO si aporta lógica operativa o implicación práctica NUEVA. NUNCA repetir
 
-CRÍTICO:
-• USA LOS 15 TIPOS - máxima variedad, NO repetir
-• Respuesta correcta del fragmento (NO inventar)
-• Cada pregunta tiene su PROPIA explicación (NO combinar)
-• 2 preguntas de tipos DIFERENTES
-• NO auto-referencias, NO narrativas
-
-JSON: {"questions":[{"question":"","options":["A) ","B) ","C) ","D) "],"correct":0,"explanation":"","difficulty":"media","page_reference":""}]}`;
+JSON ESTRICTO: {"questions":[{"question":"","options":["A) ","B) ","C) ","D) "],"correct":0,"explanation":"","difficulty":"media","page_reference":""}]}`;
 
 // PROMPT ELABORADA (20% - Genera 2 preguntas, 1 por fragmento) - NIVEL AVANZADO
 const CLAUDE_PROMPT_ELABORADA = `Eres evaluador experto OPOSICIONES Técnico Farmacia SERGAS.
 
-OBJETIVO: Genera 2 preguntas ELABORADAS (1 por fragmento, temas DIFERENTES). Requieren análisis profundo, integración conceptos, razonamiento complejo.
+OBJETIVO: Genera 2 preguntas ELABORADAS (1 por fragmento, TIPOS y CONCEPTOS DIFERENTES). Requieren análisis profundo, integración de conceptos y razonamiento complejo.
 
+🎯 ÁNGULO DE ESTE LOTE (obligatorio aplicar al menos a 1 de las 2 preguntas):
+{{DIVERSITY_ANGLE}}
+{{RECENT_QUESTIONS}}
 DIVERSIDAD CONCEPTUAL OBLIGATORIA:
-• Las 2 preguntas deben ser de ASPECTOS COMPLETAMENTE DIFERENTES
-• Si fragmentos hablan del MISMO concepto central:
-  - Enfoca cada pregunta en SUB-ASPECTOS radicalmente distintos
-  - Ejemplo: Si ambos hablan de "conservación medicamentos"
-    · Pregunta 1: temperatura/plazo
-    · Pregunta 2: normativa/responsabilidad
+• Las 2 preguntas deben tratar ASPECTOS COMPLETAMENTE DIFERENTES
+• PROHIBIDO repetir concepto central, entidad o verbo principal entre las 2 preguntas
+• PROHIBIDO replicar conceptos/formulaciones de las "PREGUNTAS RECIENTES" listadas arriba (si las hay)
+• Cada pregunta debe integrar 2+ conceptos del fragmento
 
 === FRAGMENTO 1 ===
 {{CHUNK_1}}
@@ -1181,62 +1230,44 @@ DIVERSIDAD CONCEPTUAL OBLIGATORIA:
 === FRAGMENTO 2 ===
 {{CHUNK_2}}
 
-10 TIPOS (varía):
-1)Análisis Criterios Múltiples 2)Integración Conceptos 3)Evaluación Situaciones Complejas 4)Comparación Multi-criterio 5)Consecuencias Cadena 6)Procedimientos Multi-paso 7)Análisis Excepciones 8)Síntesis Normativa Multi-requisito 9)Conflictos Normativos 10)Análisis Impacto
+10 TIPOS (elige 2 DIFERENTES para las 2 preguntas):
+1)Análisis de criterios múltiples 2)Integración de conceptos 3)Evaluación de situaciones complejas 4)Comparación multi-criterio 5)Cadena de consecuencias 6)Procedimientos multi-paso 7)Análisis de excepciones 8)Síntesis normativa multi-requisito 9)Conflictos normativos 10)Análisis de impacto
 
-INSTRUCCIONES:
+CALIDAD EXIGIDA:
+• Pregunta basada en DATOS ESPECÍFICOS del fragmento (artículos, plazos, valores, términos técnicos)
+• Requiere ANÁLISIS: comparar, priorizar, integrar o decidir entre alternativas realistas
+• PROHIBIDO inventar datos ausentes del fragmento
+• PROHIBIDO preguntas triviales o de mera definición
+• page_reference debe citar artículo/sección/protocolo concreto
 
-1. ESTILO:
-   • 60% contexto funcional (10-18 palabras): "En [situación compleja], ¿qué [análisis]?"
-   • 40% directa compleja: "¿Qué [criterios múltiples/relaciones] [análisis]?"
-   • Contexto debe ser FUNCIONAL (necesario para complejidad), NO decorativo
-   • NO narrativas ficticias
+ESTILO:
+   • 60% contexto FUNCIONAL (10-18 palabras): "En [situación técnica compleja], ¿qué [análisis/decisión] procede?"
+   • 40% directa compleja: "¿Qué [combinación de criterios/relación] [resultado]?"
+   • Contexto SIEMPRE funcional (necesario para el razonamiento), NUNCA decorativo
+   • PROHIBIDO narrativas ficticias
 
-2. DISTRACTORES AVANZADOS (7 tipos):
+DISTRACTORES AVANZADOS (7 tipos, usa 2-3 por pregunta):
    a) Respuesta parcial: omite elementos críticos
-   b) Práctica habitual no normativa: común pero técnicamente incorrecto
+   b) Práctica habitual no normativa: común pero técnicamente incorrecta
    c) Sobre-requisito: añade criterios no exigidos
-   d) Confusión normativa: legislación similar incorrecta
+   d) Confusión normativa: legislación similar pero incorrecta
    e) Secuencia incompleta: omite paso crítico
-   f) Mezcla escenarios: procedimientos de situaciones diferentes
-   g) Criterio insuficiente: solo uno de varios necesarios
-   → Requieren DOMINIO PROFUNDO
+   f) Mezcla de escenarios: procedimientos de contextos distintos
+   g) Criterio insuficiente: sólo uno de varios necesarios
+   → Requieren DOMINIO PROFUNDO, no deducibles por lógica común
 
-3. LONGITUD OPCIONES (CRÍTICO):
-   • TODAS las opciones deben tener longitud SIMILAR (±25% caracteres)
-   • Evitar opciones excesivamente largas o excesivamente cortas
-   • Variación sutil natural permitida (una ligeramente más larga/corta)
-   • Cuando existe esa variación ligera:
-     - 50% preguntas: opción CORRECTA es la más larga
-     - 50% preguntas: opción INCORRECTA es la más larga
-   • Objetivo: longitud NO debe ser pista obvia
-   • Ejemplo BIEN (todas similares, correcta es C):
-     A) "7 días entre 2-8°C" (18 chars)
-     B) "10 días temperatura ambiente" (28 chars)
-     C) "5 días refrigerado sin conservantes" (36 chars) ✓ más larga
-     D) "14 días con antioxidantes" (26 chars)
-   • Ejemplo MAL (diferencias extremas):
-     A) "7 días" (7 chars) ← DEMASIADO CORTA
-     B) "Entre 5-10 días según normativa vigente RD 1345/2007" (54 chars) ← DEMASIADO LARGA
+LONGITUD OPCIONES (CRÍTICO):
+   • TODAS similares (±25% caracteres)
+   • Ligera variación alternando (50/50) si la correcta es más larga o más corta
+   • La longitud NUNCA debe ser pista
 
-4. EXPLICACIÓN (IMPORTANTE - estructura avanzada):
-   • Una explicación INDEPENDIENTE por pregunta
-   • NO mencionar "Fragmento 1" ni "Fragmento 2"
+EXPLICACIÓN (una INDEPENDIENTE por pregunta):
    • Formato simple: "**Normativa:** dato."
    • Formato bullets si 3+ elementos: "**Normativa:**\n• Item1\n• Item2"
-   • Máximo 15 palabras en dato (20 si bullets)
-   • 💡 **Incluir razón** si añade contexto crítico útil (seguridad/legal, implicación grave, porqué esencial): "\n\n💡 *Razón:* porqué" (máx 7 palabras)
-   • **NO incluir razón** si solo repite la información ya explicada
+   • Máximo 15 palabras (20 si bullets)
+   • 💡 "*Razón:* porqué" (máx 7 palabras) SOLO si aporta implicación crítica (seguridad/legal) NUEVA
 
-CRÍTICO:
-• Integrar 2+ conceptos del fragmento
-• Cada pregunta tiene su PROPIA explicación (NO combinar)
-• 2 preguntas tipos DIFERENTES
-• Si fragmento no permite elaborada, hacer MEDIA difícil
-• Respuesta correcta del fragmento (NO inventar)
-• NO auto-referencias, NO narrativas
-
-JSON: {"questions":[{"question":"","options":["A) ","B) ","C) ","D) "],"correct":0,"explanation":"","difficulty":"elaborada","page_reference":""}]}`;
+JSON ESTRICTO: {"questions":[{"question":"","options":["A) ","B) ","C) ","D) "],"correct":0,"explanation":"","difficulty":"elaborada","page_reference":""}]}`;
 
 // ========================
 // FUNCIONES DE ARCHIVOS OPTIMIZADAS
@@ -1959,9 +1990,7 @@ app.post('/api/admin/populate-cache', requireAdmin, async (req, res) => {
             const chunk1 = chunks[chunk1Index];
             const chunk2 = chunks[chunk2Index];
 
-            const fullPrompt = CLAUDE_PROMPT_SIMPLE
-              .replace('{{CHUNK_1}}', chunk1)
-              .replace('{{CHUNK_2}}', chunk2);
+            const fullPrompt = renderPrompt(CLAUDE_PROMPT_SIMPLE, chunk1, chunk2, ADMIN_USER_ID, currentTopic);
 
             try {
               const response = await callClaudeWithImprovedRetry(fullPrompt, MAX_TOKENS_CONFIG.simple, 'simple', 2);
@@ -1995,9 +2024,7 @@ app.post('/api/admin/populate-cache', requireAdmin, async (req, res) => {
             const chunk1 = chunks[chunk1Index];
             const chunk2 = chunks[chunk2Index];
 
-            const fullPrompt = CLAUDE_PROMPT_MEDIA
-              .replace('{{CHUNK_1}}', chunk1)
-              .replace('{{CHUNK_2}}', chunk2);
+            const fullPrompt = renderPrompt(CLAUDE_PROMPT_MEDIA, chunk1, chunk2, ADMIN_USER_ID, currentTopic);
 
             try {
               const response = await callClaudeWithImprovedRetry(fullPrompt, MAX_TOKENS_CONFIG.media, 'media', 2);
@@ -2031,9 +2058,7 @@ app.post('/api/admin/populate-cache', requireAdmin, async (req, res) => {
             const chunk1 = chunks[chunk1Index];
             const chunk2 = chunks[chunk2Index];
 
-            const fullPrompt = CLAUDE_PROMPT_ELABORADA
-              .replace('{{CHUNK_1}}', chunk1)
-              .replace('{{CHUNK_2}}', chunk2);
+            const fullPrompt = renderPrompt(CLAUDE_PROMPT_ELABORADA, chunk1, chunk2, ADMIN_USER_ID, currentTopic);
 
             try {
               const response = await callClaudeWithImprovedRetry(fullPrompt, MAX_TOKENS_CONFIG.elaborada, 'elaborada', 2);
@@ -2213,10 +2238,8 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
             const chunk1 = topicChunks[selectedIndices[0]];
             const chunk2 = selectedIndices.length > 1 ? topicChunks[selectedIndices[1]] : chunk1;
 
-            // Crear prompt con 2 fragmentos
-            const fullPrompt = CLAUDE_PROMPT_SIMPLE
-              .replace('{{CHUNK_1}}', chunk1)
-              .replace('{{CHUNK_2}}', chunk2);
+            // Prompt con diversidad (chunks + ángulo + historial reciente)
+            const fullPrompt = renderPrompt(CLAUDE_PROMPT_SIMPLE, chunk1, chunk2, userId, currentTopic);
 
             try {
               const response = await callClaudeWithImprovedRetry(fullPrompt, MAX_TOKENS_CONFIG.simple, 'simple', 2);
@@ -2298,10 +2321,8 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
             const chunk1 = topicChunks[selectedIndices[0]];
             const chunk2 = selectedIndices.length > 1 ? topicChunks[selectedIndices[1]] : chunk1;
 
-            // Crear prompt con 2 fragmentos
-            const fullPrompt = CLAUDE_PROMPT_MEDIA
-              .replace('{{CHUNK_1}}', chunk1)
-              .replace('{{CHUNK_2}}', chunk2);
+            // Prompt con diversidad (chunks + ángulo + historial reciente)
+            const fullPrompt = renderPrompt(CLAUDE_PROMPT_MEDIA, chunk1, chunk2, userId, currentTopic);
 
             try {
               const response = await callClaudeWithImprovedRetry(fullPrompt, MAX_TOKENS_CONFIG.media, 'media', 2);
@@ -2383,10 +2404,8 @@ app.post('/api/generate-exam', requireAuth, examLimiter, async (req, res) => {
             const chunk1 = topicChunks[selectedIndices[0]];
             const chunk2 = selectedIndices.length > 1 ? topicChunks[selectedIndices[1]] : chunk1;
 
-            // Crear prompt con 2 fragmentos
-            const fullPrompt = CLAUDE_PROMPT_ELABORADA
-              .replace('{{CHUNK_1}}', chunk1)
-              .replace('{{CHUNK_2}}', chunk2);
+            // Prompt con diversidad (chunks + ángulo + historial reciente)
+            const fullPrompt = renderPrompt(CLAUDE_PROMPT_ELABORADA, chunk1, chunk2, userId, currentTopic);
 
             try {
               const response = await callClaudeWithImprovedRetry(fullPrompt, MAX_TOKENS_CONFIG.elaborada, 'elaborada', 2);
@@ -2595,7 +2614,7 @@ app.post('/api/study/pre-warm', requireAuth, async (req, res) => {
     // Verificar si ya tiene buffer
     const currentBufferSize = db.getBufferSize(userId, topicId);
 
-    if (currentBufferSize >= 3) {
+    if (currentBufferSize >= BUFFER_TARGET_SIZE) {
       console.log(`✓ Buffer ya tiene ${currentBufferSize} preguntas, no es necesario pre-warm`);
       return res.json({
         success: true,
@@ -2614,24 +2633,25 @@ app.post('/api/study/pre-warm', requireAuth, async (req, res) => {
     // Generar preguntas en background (CONTROLADO - previene duplicados)
     setImmediate(() => {
       runControlledBackgroundGeneration(userId, topicId, async () => {
-        console.log(`🔨 [Background] Pre-warming: generando 2 preguntas rápidas (cache: 90%)...`);
+        console.log(`🔨 [Background] Pre-warming: generando preguntas rápidas (cache: 90%)...`);
 
-        const questionsNeeded = Math.min(2, 3 - currentBufferSize);
-        if (questionsNeeded > 0) {
-          const batchQuestions = await generateQuestionBatch(userId, topicId, questionsNeeded, 0.90);
+        // Fase 1: Genera primer lote rápido (2-3) para entrega inmediata
+        const initialNeeded = Math.min(3, BUFFER_TARGET_SIZE - currentBufferSize);
+        if (initialNeeded > 0) {
+          const batchQuestions = await generateQuestionBatch(userId, topicId, initialNeeded, 0.90);
 
-          // Añadir todas al buffer
           for (const q of batchQuestions) {
             db.addToBuffer(userId, topicId, q, q.difficulty, q._cacheId || null);
           }
 
-          const finalBufferSize = db.getBufferSize(userId, topicId);
-          console.log(`✅ [Background] Pre-warming completado: ${finalBufferSize} pregunta(s) en buffer`);
+          const afterInitial = db.getBufferSize(userId, topicId);
+          console.log(`✅ [Background] Pre-warming fase 1: ${afterInitial} preguntas en buffer`);
 
-          // Si aún no tiene 3, generar 1 más en background
-          if (finalBufferSize < 3) {
-            console.log(`🔄 Buffer bajo (${finalBufferSize}), generando ${3 - finalBufferSize} pregunta(s) más...`);
-            await refillBuffer(userId, topicId, 3 - finalBufferSize);
+          // Fase 2: Continuar rellenando hasta el objetivo
+          if (afterInitial < BUFFER_TARGET_SIZE) {
+            const remaining = BUFFER_TARGET_SIZE - afterInitial;
+            console.log(`🔄 Continuando pre-warming: generando ${remaining} pregunta(s) más hasta objetivo ${BUFFER_TARGET_SIZE}...`);
+            await refillBuffer(userId, topicId, remaining);
           }
         }
       });
@@ -2691,14 +2711,14 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
         const newBufferSize = db.getBufferSize(userId, topicId);
         console.log(`💾 Buffer después de entrega: ${newBufferSize} preguntas`);
 
-        // Si buffer bajó de 3, rellenar en background
-        if (newBufferSize < 3) {
+        // Si buffer bajó del umbral, rellenar en background
+        if (newBufferSize < BUFFER_REFILL_TRIGGER) {
           console.log(`🔄 Buffer bajo (${newBufferSize}), iniciando refill en background...`);
 
-          // Generar 2-3 preguntas más en background (CONTROLADO - previene duplicados)
+          // Rellenar hasta el objetivo (CONTROLADO - previene duplicados)
           setImmediate(() => {
             runControlledBackgroundGeneration(userId, topicId, async () => {
-              await refillBuffer(userId, topicId, 3 - newBufferSize);
+              await refillBuffer(userId, topicId, BUFFER_TARGET_SIZE - newBufferSize);
             });
           });
         }
@@ -2746,13 +2766,13 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
       console.log(`✅ Pregunta generada y entregada (solo se generó 1)`);
     }
 
-    // Iniciar refill en background para completar buffer a 3 preguntas
+    // Iniciar refill en background para completar buffer al objetivo
     setImmediate(() => {
       runControlledBackgroundGeneration(userId, topicId, async () => {
         const currentSize = db.getBufferSize(userId, topicId);
-        const needed = 3 - currentSize;
+        const needed = BUFFER_TARGET_SIZE - currentSize;
         if (needed > 0) {
-          console.log(`🔄 Llenando buffer en background (${needed} preguntas más)...`);
+          console.log(`🔄 Llenando buffer en background (${needed} preguntas más, objetivo: ${BUFFER_TARGET_SIZE})...`);
           await refillBuffer(userId, topicId, needed);
         }
       });
@@ -2774,6 +2794,40 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error en /api/study/question:', error);
+
+    // 🆘 FALLBACK: Antes de devolver error, intentar servir CUALQUIER pregunta de caché
+    // (incluso si el usuario ya la vio hace menos de 15 días). Esto evita que el usuario
+    // vea la notificación de "Reintentando..." cuando la API de IA falla transitoriamente.
+    try {
+      const { topicId } = req.body;
+      const userId = req.user?.id;
+      if (userId && topicId) {
+        const fallback = db.getCachedQuestionFallback(userId, [topicId], null, []);
+        if (fallback && fallback.question) {
+          console.log(`🆘 Sirviendo pregunta de fallback (cacheId: ${fallback.cacheId}) tras fallo de generación`);
+          db.markQuestionAsSeen(userId, fallback.cacheId, 'study');
+
+          // Lanzar refill en background para recuperar buffer sin bloquear al usuario
+          setImmediate(() => {
+            runControlledBackgroundGeneration(userId, topicId, async () => {
+              const size = db.getBufferSize(userId, topicId);
+              if (size < BUFFER_TARGET_SIZE) {
+                await refillBuffer(userId, topicId, BUFFER_TARGET_SIZE - size);
+              }
+            });
+          });
+
+          const randomizedQuestion = randomizeQuestionOptions(fallback.question);
+          return res.json({
+            questions: [randomizedQuestion],
+            source: 'fallback',
+            bufferSize: db.getBufferSize(userId, topicId)
+          });
+        }
+      }
+    } catch (fallbackError) {
+      console.error('❌ Error en fallback de caché:', fallbackError);
+    }
 
     // Validar que error existe antes de acceder a propiedades
     const errorCode = error?.status || (error?.message ? 500 : 520);
@@ -2888,10 +2942,8 @@ async function generateQuestionBatch(userId, topicId, count = 3, cacheProb = 0.9
         maxTokens = MAX_TOKENS_CONFIG.elaborada;
       }
 
-      // Crear prompt con 2 fragmentos
-      const fullPrompt = prompt
-        .replace('{{CHUNK_1}}', chunk1)
-        .replace('{{CHUNK_2}}', chunk2);
+      // Prompt con diversidad (chunks + ángulo + historial reciente del usuario)
+      const fullPrompt = renderPrompt(prompt, chunk1, chunk2, userId, topicId);
 
       try {
         const claudeStartTime = Date.now();
@@ -2998,20 +3050,20 @@ async function executeWithConcurrencyLimit(promiseFunctions, concurrencyLimit = 
 /**
  * Rellenar buffer en background
  */
-async function refillBuffer(userId, topicId, count = 3) {
+async function refillBuffer(userId, topicId, count = BUFFER_TARGET_SIZE) {
   console.log(`🔄 [Background] Rellenando buffer con ${count} preguntas...`);
 
   try {
     // 🔴 FIX: Verificar buffer actual antes de generar (previene duplicados por race condition)
     const currentBufferSize = db.getBufferSize(userId, topicId);
 
-    if (currentBufferSize >= 3) {
-      console.log(`⏭️  [Background] Buffer ya tiene ${currentBufferSize} preguntas, refill cancelado`);
+    if (currentBufferSize >= BUFFER_TARGET_SIZE) {
+      console.log(`⏭️  [Background] Buffer ya tiene ${currentBufferSize}/${BUFFER_TARGET_SIZE} preguntas, refill cancelado`);
       return;
     }
 
-    // Ajustar cantidad a generar según buffer actual (máximo 3)
-    const actualCount = Math.min(count, Math.max(0, 3 - currentBufferSize));
+    // Ajustar cantidad a generar según buffer actual (tope: BUFFER_TARGET_SIZE)
+    const actualCount = Math.min(count, Math.max(0, BUFFER_TARGET_SIZE - currentBufferSize));
 
     if (actualCount === 0) {
       console.log(`⏭️  [Background] Buffer completo, no se necesita refill`);
@@ -3359,9 +3411,7 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
 
           const chunk1 = chunks[chunk1Index];
           const chunk2 = chunks[chunk2Index];
-          const fullPrompt = CLAUDE_PROMPT_SIMPLE
-            .replace('{{CHUNK_1}}', chunk1)
-            .replace('{{CHUNK_2}}', chunk2);
+          const fullPrompt = renderPrompt(CLAUDE_PROMPT_SIMPLE, chunk1, chunk2, userId, null);
 
           try {
             const response = await callClaudeWithImprovedRetry(fullPrompt, MAX_TOKENS_CONFIG.simple, 'simple', 2);
@@ -3390,9 +3440,7 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
 
           const chunk1 = chunks[chunk1Index];
           const chunk2 = chunks[chunk2Index];
-          const fullPrompt = CLAUDE_PROMPT_MEDIA
-            .replace('{{CHUNK_1}}', chunk1)
-            .replace('{{CHUNK_2}}', chunk2);
+          const fullPrompt = renderPrompt(CLAUDE_PROMPT_MEDIA, chunk1, chunk2, userId, null);
 
           try {
             const response = await callClaudeWithImprovedRetry(fullPrompt, MAX_TOKENS_CONFIG.media, 'media', 2);
@@ -3421,9 +3469,7 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
 
           const chunk1 = chunks[chunk1Index];
           const chunk2 = chunks[chunk2Index];
-          const fullPrompt = CLAUDE_PROMPT_ELABORADA
-            .replace('{{CHUNK_1}}', chunk1)
-            .replace('{{CHUNK_2}}', chunk2);
+          const fullPrompt = renderPrompt(CLAUDE_PROMPT_ELABORADA, chunk1, chunk2, userId, null);
 
           try {
             const response = await callClaudeWithImprovedRetry(fullPrompt, MAX_TOKENS_CONFIG.elaborada, 'elaborada', 2);
