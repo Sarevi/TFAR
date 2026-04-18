@@ -242,6 +242,16 @@ const MAX_TOKENS_CONFIG = {
   elaborada: 1000   // 2 preguntas × 500 tokens (margen amplio)
 };
 
+// CONFIGURACIÓN DE MODELO POR DIFICULTAD (ESTRATEGIA MIXTA):
+// - Simple y Media → Haiku 4.5 (rápido, económico, suficiente para recall/aplicación)
+// - Elaborada → Sonnet 4.6 (razonamiento profundo, distractores finos, integración multi-concepto)
+// Coste ponderado resultante: ~$0.0015/pregunta (~650 preguntas/€).
+const MODEL_CONFIG = {
+  simple: 'claude-haiku-4-5-20251001',
+  media: 'claude-haiku-4-5-20251001',
+  elaborada: 'claude-sonnet-4-6'
+};
+
 // ========================
 // CONTROL DE GENERACIONES EN BACKGROUND
 // ========================
@@ -424,14 +434,16 @@ async function callClaudeWithImprovedRetry(fullPrompt, maxTokens = 700, question
 
       for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
         try {
-          console.log(`🤖 Intento ${attempt}/${config.maxRetries} - Generando ${questionsPerCall} preguntas ${questionType}...`);
+          // Estrategia mixta: Haiku 4.5 para simple/media, Sonnet 4.6 para elaborada
+          const model = MODEL_CONFIG[questionType] || 'claude-haiku-4-5-20251001';
+          console.log(`🤖 Intento ${attempt}/${config.maxRetries} - Generando ${questionsPerCall} preguntas ${questionType} con ${model}...`);
 
           // Determinar temperatura según dificultad
           const temperature = TEMPERATURE_CONFIG[questionType] || 0.5;
 
           // Envolver llamada a Claude con rate limiter (respeta 50 req/min)
           const response = await claudeLimiter.schedule(() => anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001", // Claude Haiku 4.5 - Rápido, económico y capaz
+        model: model, // Haiku 4.5 (simple/media) o Sonnet 4.6 (elaborada)
         max_tokens: maxTokens, // Variable según tipo de pregunta
         temperature: temperature,  // Temperatura variable según dificultad
         /* SISTEMA PREMIUM - MÁXIMA CALIDAD (20% Simple / 60% Media / 20% Elaborada):
