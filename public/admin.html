@@ -372,6 +372,66 @@
             margin-bottom: 5px;
         }
 
+        /* GESTIÓN DE TEMAS */
+        .topic-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            border-bottom: 1px solid #eee;
+            gap: 15px;
+        }
+        .topic-row:last-child { border-bottom: none; }
+        .topic-row.disabled { opacity: 0.55; }
+        .topic-info { flex: 1; min-width: 0; }
+        .topic-info strong {
+            display: block;
+            color: #333;
+            font-size: 0.95rem;
+            margin-bottom: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .topic-info small { color: #888; font-size: 0.82rem; }
+        .topic-status-badge {
+            font-size: 0.75rem;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-weight: 600;
+            margin-right: 10px;
+        }
+        .topic-status-badge.on  { background: #d4edda; color: #155724; }
+        .topic-status-badge.off { background: #f8d7da; color: #721c24; }
+        .topic-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+        .topic-switch input { opacity: 0; width: 0; height: 0; }
+        .switch-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: #ccc;
+            border-radius: 26px;
+            transition: .25s;
+        }
+        .switch-slider::before {
+            content: "";
+            position: absolute;
+            height: 20px; width: 20px;
+            left: 3px; bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: .25s;
+        }
+        .topic-switch input:checked + .switch-slider { background: #10b981; }
+        .topic-switch input:checked + .switch-slider::before { transform: translateX(24px); }
+        .topic-switch input:disabled + .switch-slider { cursor: not-allowed; opacity: 0.5; }
+
         .stats-item .value {
             font-size: 1.5rem;
             font-weight: 700;
@@ -572,6 +632,23 @@
                 <div class="loading">Cargando usuarios...</div>
             </div>
         </div>
+
+        <!-- GESTIÓN DE TEMAS -->
+        <div class="users-container" style="margin-top: 30px;">
+            <div class="section-header">
+                <h2>Gestión de Temas</h2>
+                <div style="display: flex; gap: 10px;">
+                    <button class="action-button" onclick="loadTopics()">🔄 Refrescar</button>
+                </div>
+            </div>
+            <p style="color: #666; font-size: 0.9rem; margin: 0 0 15px 0;">
+                Activa o desactiva los temas. Los desactivados no aparecen para los usuarios.
+                Los temas nuevos arrancan <strong>desactivados</strong> por defecto.
+            </p>
+            <div id="topics-container">
+                <div class="loading">Cargando temas...</div>
+            </div>
+        </div>
     </div>
 
     <!-- MODAL DE ESTADÍSTICAS DETALLADAS -->
@@ -671,6 +748,7 @@
                 renderUsers();
                 updateGeneralStats();
                 loadTodayActivity();
+                loadTopics();
             } catch (error) {
                 console.error('Error:', error);
                 showLoginError('Error de conexión');
@@ -1127,6 +1205,89 @@
                 console.error('Error:', error);
                 showNotification('❌ Error al descargar Excel', 'error');
             });
+        }
+
+        // ========================
+        // GESTIÓN DE TEMAS
+        // ========================
+
+        async function loadTopics() {
+            const container = document.getElementById('topics-container');
+            container.innerHTML = '<div class="loading">Cargando temas...</div>';
+            try {
+                const response = await fetch('/api/admin/topics', {
+                    headers: { 'X-Admin-Password': adminPassword }
+                });
+                if (!response.ok) {
+                    container.innerHTML = '<div style="color: #dc3545; padding: 15px;">Error cargando temas</div>';
+                    return;
+                }
+                const data = await response.json();
+                renderTopics(data.topics || []);
+            } catch (err) {
+                console.error('Error cargando temas:', err);
+                container.innerHTML = '<div style="color: #dc3545; padding: 15px;">Error de red al cargar temas</div>';
+            }
+        }
+
+        function renderTopics(topics) {
+            const container = document.getElementById('topics-container');
+            if (!topics.length) {
+                container.innerHTML = '<div style="padding: 15px; color: #888;">No hay temas configurados.</div>';
+                return;
+            }
+            const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+            container.innerHTML = topics.map(t => `
+                <div class="topic-row ${t.enabled ? '' : 'disabled'}" id="topic-row-${escapeHtml(t.id)}">
+                    <div class="topic-info">
+                        <strong>${escapeHtml(t.title)}</strong>
+                        <small>${escapeHtml(t.description || '')}</small>
+                    </div>
+                    <span class="topic-status-badge ${t.enabled ? 'on' : 'off'}" id="topic-badge-${escapeHtml(t.id)}">
+                        ${t.enabled ? 'Activo' : 'Inactivo'}
+                    </span>
+                    <label class="topic-switch">
+                        <input type="checkbox" ${t.enabled ? 'checked' : ''}
+                               onchange="toggleTopic('${escapeHtml(t.id)}', this.checked, this)">
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        async function toggleTopic(topicId, enabled, inputEl) {
+            inputEl.disabled = true;
+            try {
+                const response = await fetch(`/api/admin/topics/${encodeURIComponent(topicId)}/toggle`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify({ enabled })
+                });
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    alert('Error: ' + (errData.error || 'No se pudo cambiar el estado'));
+                    inputEl.checked = !enabled;
+                } else {
+                    const row = document.getElementById('topic-row-' + topicId);
+                    const badge = document.getElementById('topic-badge-' + topicId);
+                    if (row) row.classList.toggle('disabled', !enabled);
+                    if (badge) {
+                        badge.textContent = enabled ? 'Activo' : 'Inactivo';
+                        badge.className = 'topic-status-badge ' + (enabled ? 'on' : 'off');
+                    }
+                }
+            } catch (err) {
+                console.error('Error toggle tema:', err);
+                alert('Error de red al cambiar estado del tema');
+                inputEl.checked = !enabled;
+            } finally {
+                inputEl.disabled = false;
+            }
         }
 
         // Auto-refresh cada 30 segundos

@@ -412,6 +412,27 @@ const TOPIC_CONFIG = {
 };
 
 // ========================
+// MIGRACIÓN INICIAL DE ESTADO DE TEMAS
+// ========================
+// Si la tabla topic_status está vacía (primer arranque tras deploy), los temas
+// existentes se marcan como ACTIVOS para no romper la experiencia de usuarios
+// actuales. Solo los temas nuevos añadidos después arrancarán INACTIVOS.
+(function migrateInitialTopicStatus() {
+  try {
+    const existing = db.getTopicStatusMap();
+    if (Object.keys(existing).length === 0) {
+      const topicIds = Object.keys(TOPIC_CONFIG);
+      console.log(`🎚️  Primera ejecución: marcando ${topicIds.length} temas existentes como ACTIVOS`);
+      for (const id of topicIds) {
+        db.setTopicEnabled(id, true);
+      }
+    }
+  } catch (err) {
+    console.error('⚠️  Error en migración inicial de topic_status:', err);
+  }
+})();
+
+// ========================
 // SISTEMA OPTIMIZADO DE LLAMADAS A CLAUDE
 // ========================
 
@@ -2113,12 +2134,67 @@ app.post('/api/admin/populate-cache', requireAdmin, async (req, res) => {
 });
 
 // ========================
+// GESTIÓN DE TEMAS (admin)
+// ========================
+
+/**
+ * Lista TODOS los temas con su estado de activación.
+ * Los temas que nunca se han registrado en topic_status se devuelven como inactivos.
+ */
+app.get('/api/admin/topics', requireAdmin, (req, res) => {
+  try {
+    const statusMap = db.getTopicStatusMap();
+    const topics = Object.entries(TOPIC_CONFIG).map(([id, cfg]) => ({
+      id,
+      title: cfg.title,
+      description: cfg.description,
+      enabled: statusMap[id] === true
+    }));
+    res.json({ topics });
+  } catch (error) {
+    console.error('Error listando temas admin:', error);
+    res.status(500).json({ error: 'Error al obtener temas' });
+  }
+});
+
+/**
+ * Activa o desactiva un tema. Body: { enabled: boolean }
+ */
+app.post('/api/admin/topics/:topicId/toggle', requireAdmin, (req, res) => {
+  try {
+    const { topicId } = req.params;
+    const { enabled } = req.body;
+
+    if (!TOPIC_CONFIG[topicId]) {
+      return res.status(404).json({ error: `Tema "${topicId}" no existe en la configuración` });
+    }
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'Campo "enabled" debe ser booleano' });
+    }
+
+    const ok = db.setTopicEnabled(topicId, enabled);
+    if (!ok) {
+      return res.status(500).json({ error: 'No se pudo actualizar el estado' });
+    }
+
+    console.log(`🎚️  Tema ${topicId} ${enabled ? 'ACTIVADO' : 'DESACTIVADO'} por admin`);
+    res.json({ success: true, topicId, enabled });
+  } catch (error) {
+    console.error('Error toggle tema:', error);
+    res.status(500).json({ error: 'Error al cambiar estado del tema' });
+  }
+});
+
+// ========================
 // RUTAS DE LA API OPTIMIZADAS
 // ========================
 
 app.get('/api/topics', (req, res) => {
   try {
-    res.json(Object.keys(TOPIC_CONFIG));
+    // Solo devolver temas activos al usuario final
+    const enabled = new Set(db.getEnabledTopicIds());
+    const visibleTopics = Object.keys(TOPIC_CONFIG).filter(id => enabled.has(id));
+    res.json(visibleTopics);
   } catch (error) {
     res.status(500).json({ error: 'Error al obtener temas' });
   }
@@ -2620,6 +2696,10 @@ app.post('/api/study/pre-warm', requireAuth, async (req, res) => {
     if (!TOPIC_CONFIG[topicId]) {
       return res.status(400).json({ error: `Tema "${topicId}" no existe` });
     }
+    // Validación: tema está activo
+    if (!db.isTopicEnabled(topicId)) {
+      return res.status(403).json({ error: 'Tema no disponible' });
+    }
 
     console.log(`🔥 Pre-warming: Usuario ${userId} seleccionó tema ${topicId}`);
 
@@ -2695,6 +2775,10 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
     // Validación: topicId existe en la configuración
     if (!TOPIC_CONFIG[topicId]) {
       return res.status(400).json({ error: `Tema "${topicId}" no existe` });
+    }
+    // Validación: tema está activo
+    if (!db.isTopicEnabled(topicId)) {
+      return res.status(403).json({ error: 'Tema no disponible' });
     }
 
     console.log(`📚 Usuario ${userId} solicita pregunta de estudio: ${topicId}`);
@@ -3301,13 +3385,18 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
 
     console.log(`🎓 Usuario ${userId} solicita EXAMEN OFICIAL de ${questionCount} preguntas`);
 
-    // Obtener todos los temas disponibles
-    const allTopics = Object.keys(TOPIC_CONFIG);
+    // Obtener todos los temas disponibles (solo los activos)
+    const enabledIds = new Set(db.getEnabledTopicIds());
+    const allTopics = Object.keys(TOPIC_CONFIG).filter(id => enabledIds.has(id));
+
+    if (allTopics.length === 0) {
+      return res.status(503).json({ error: 'No hay temas activos disponibles para examen' });
+    }
 
     // Calcular cuántas preguntas por tema (distribución equitativa)
     const questionsPerTopic = Math.ceil(questionCount / allTopics.length);
 
-    console.log(`📚 Generando ${questionsPerTopic} preguntas por tema de ${allTopics.length} temas`);
+    console.log(`📚 Generando ${questionsPerTopic} preguntas por tema de ${allTopics.length} temas activos`);
 
     // Obtener todo el contenido mezclado de todos los temas
     const allContent = await getDocumentsByTopics(allTopics);
@@ -3761,7 +3850,13 @@ async function preGenerateMonthlyCache() {
   console.log('🚀 ========================================\n');
 
   const startTime = Date.now();
-  const allTopics = Object.keys(TOPIC_CONFIG);
+  // Solo pre-generar para temas activos (evita gastar tokens en temas desactivados)
+  const enabledIds = new Set(db.getEnabledTopicIds());
+  const allTopics = Object.keys(TOPIC_CONFIG).filter(id => enabledIds.has(id));
+  if (allTopics.length === 0) {
+    console.log('⏭️  No hay temas activos. Pre-generación mensual cancelada.');
+    return;
+  }
   const SYSTEM_USER_ID = 0; // Usuario especial para pre-generación
   const QUESTIONS_PER_TOPIC = 100; // 100 preguntas por tema para 90% cache hit rate
   const MAX_RETRIES_PER_DIFFICULTY = 3; // Reintentos máximos por dificultad

@@ -215,6 +215,15 @@ function initDatabase() {
   // Índice para consultas rápidas de historial por usuario y fecha
   db.exec(`CREATE INDEX IF NOT EXISTS idx_answer_history_user_date ON answer_history(user_id, answered_at)`);
 
+  // Tabla de estado de temas (activo/inactivo gestionado desde admin)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS topic_status (
+      topic_id TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
   // ========================
   // ÍNDICES DE OPTIMIZACIÓN (FASE 2)
   // ========================
@@ -1449,6 +1458,74 @@ function getWeeklySummary(userId, weeks = 4) {
 }
 
 // ========================
+// GESTIÓN DE ESTADO DE TEMAS (activo/inactivo)
+// ========================
+
+/**
+ * Devuelve true si el tema está marcado como activo. Si nunca se ha
+ * registrado en topic_status se considera INACTIVO por defecto.
+ */
+function isTopicEnabled(topicId) {
+  try {
+    const row = db.prepare('SELECT enabled FROM topic_status WHERE topic_id = ?').get(topicId);
+    return !!(row && row.enabled);
+  } catch (error) {
+    console.error('Error en isTopicEnabled:', error);
+    return false;
+  }
+}
+
+/**
+ * Lista de IDs de temas activos (enabled=1).
+ */
+function getEnabledTopicIds() {
+  try {
+    const rows = db.prepare('SELECT topic_id FROM topic_status WHERE enabled = 1').all();
+    return rows.map(r => r.topic_id);
+  } catch (error) {
+    console.error('Error en getEnabledTopicIds:', error);
+    return [];
+  }
+}
+
+/**
+ * Mapa { topic_id: true|false } con el estado de todos los temas registrados.
+ * Los temas no registrados todavía no aparecen aquí (el caller debe
+ * tratarlos como inactivos por defecto).
+ */
+function getTopicStatusMap() {
+  try {
+    const rows = db.prepare('SELECT topic_id, enabled FROM topic_status').all();
+    const map = {};
+    for (const r of rows) map[r.topic_id] = !!r.enabled;
+    return map;
+  } catch (error) {
+    console.error('Error en getTopicStatusMap:', error);
+    return {};
+  }
+}
+
+/**
+ * Activa o desactiva un tema. Crea la fila si no existe (UPSERT).
+ */
+function setTopicEnabled(topicId, enabled) {
+  try {
+    const now = Date.now();
+    db.prepare(`
+      INSERT INTO topic_status (topic_id, enabled, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(topic_id) DO UPDATE SET
+        enabled = excluded.enabled,
+        updated_at = excluded.updated_at
+    `).run(topicId, enabled ? 1 : 0, now);
+    return true;
+  } catch (error) {
+    console.error('Error en setTopicEnabled:', error);
+    return false;
+  }
+}
+
+// ========================
 // EXPORTAR FUNCIONES
 // ========================
 
@@ -1497,5 +1574,10 @@ module.exports = {
   recordAnswer,
   getWeeklyStatsByTopic,
   getWeeklySummary,
+  // Gestión de estado de temas (admin)
+  isTopicEnabled,
+  getEnabledTopicIds,
+  getTopicStatusMap,
+  setTopicEnabled,
   db
 };
