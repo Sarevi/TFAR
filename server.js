@@ -2696,9 +2696,9 @@ app.post('/api/study/pre-warm', requireAuth, async (req, res) => {
     if (!TOPIC_CONFIG[topicId]) {
       return res.status(400).json({ error: `Tema "${topicId}" no existe` });
     }
-    // Validación: tema está activo
+    // Validación: tema está activo (404 en vez de 403 para no confundir con sesión expirada)
     if (!db.isTopicEnabled(topicId)) {
-      return res.status(403).json({ error: 'Tema no disponible' });
+      return res.status(404).json({ error: 'Tema no disponible' });
     }
 
     console.log(`🔥 Pre-warming: Usuario ${userId} seleccionó tema ${topicId}`);
@@ -2776,9 +2776,9 @@ app.post('/api/study/question', requireAuth, studyLimiter, async (req, res) => {
     if (!TOPIC_CONFIG[topicId]) {
       return res.status(400).json({ error: `Tema "${topicId}" no existe` });
     }
-    // Validación: tema está activo
+    // Validación: tema está activo (404 en vez de 403 para no confundir con sesión expirada)
     if (!db.isTopicEnabled(topicId)) {
-      return res.status(403).json({ error: 'Tema no disponible' });
+      return res.status(404).json({ error: 'Tema no disponible' });
     }
 
     console.log(`📚 Usuario ${userId} solicita pregunta de estudio: ${topicId}`);
@@ -3765,14 +3765,17 @@ app.post('/api/resolve-failed-question', requireAuth, (req, res) => {
 app.get('/api/documents-status', async (req, res) => {
   try {
     const status = {};
-    
+    // Solo devolver temas activos al frontend del usuario
+    const enabledIds = new Set(db.getEnabledTopicIds());
+
     for (const [topicId, config] of Object.entries(TOPIC_CONFIG)) {
+      if (!enabledIds.has(topicId)) continue;
       status[topicId] = {
         title: config.title,
         description: config.description,
         files: []
       };
-      
+
       for (const fileName of config.files) {
         const filePath = path.join(DOCUMENTS_DIR, fileName);
         try {
@@ -3783,7 +3786,7 @@ app.get('/api/documents-status', async (req, res) => {
         }
       }
     }
-    
+
     res.json(status);
   } catch (error) {
     res.status(500).json({ error: 'Error verificando documentos' });
