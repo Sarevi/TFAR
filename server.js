@@ -235,11 +235,12 @@ const TEMPERATURE_CONFIG = {
   'elaborada': 0.85   // Mayor creatividad en casos complejos (antes 0.7)
 };
 
-// CONFIGURACIÓN DE TOKENS OPTIMIZADA (2 preguntas por llamada)
+// CONFIGURACIÓN DE TOKENS (2 preguntas por llamada)
+// Valores aumentados para evitar truncación JSON en preguntas largas en español
 const MAX_TOKENS_CONFIG = {
-  simple: 600,      // 2 preguntas × 300 tokens (margen amplio)
-  media: 800,       // 2 preguntas × 400 tokens (margen amplio)
-  elaborada: 1000   // 2 preguntas × 500 tokens (margen amplio)
+  simple: 900,      // 2 preguntas × 450 tokens
+  media: 1400,      // 2 preguntas × 700 tokens
+  elaborada: 2000   // 2 preguntas × 1000 tokens (elaboradas tienen opciones y explicaciones largas)
 };
 
 // CONFIGURACIÓN DE MODELO POR DIFICULTAD (ESTRATEGIA MIXTA):
@@ -3418,9 +3419,9 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
     const topicId = 'examen-oficial'; // ID especial para examen oficial
     let allGeneratedQuestions = [];
 
-    // 🔴 SOBRE-GENERAR 10% para asegurar que lleguemos al mínimo después de filtrar inválidas
-    // Ejemplo: piden 100 → generamos 110 → devolvemos 100 válidas
-    const bufferPercentage = 0.10; // 10% extra
+    // 🔴 SOBRE-GENERAR 20% para asegurar que lleguemos al mínimo después de filtrar inválidas
+    // Ejemplo: piden 100 → generamos 120 → devolvemos 100 válidas
+    const bufferPercentage = 0.20; // 20% extra
     const totalToGenerate = Math.ceil(questionCount * (1 + bufferPercentage));
 
     // SISTEMA 3 NIVELES: 20% simples / 60% medias / 20% elaboradas
@@ -3598,13 +3599,13 @@ app.post('/api/exam/official', requireAuth, examLimiter, async (req, res) => {
       console.log(`✅ Generación paralela completada: ${results.flat().length} preguntas nuevas generadas`);
     }
 
-    // Validar que tenemos AL MENOS las preguntas solicitadas (gracias al buffer del 10%)
+    // Validar que tenemos AL MENOS las preguntas solicitadas (gracias al buffer del 20%)
     console.log(`📊 Generadas ${allGeneratedQuestions.length} preguntas (solicitadas: ${questionCount})`);
 
     if (allGeneratedQuestions.length < questionCount) {
       return res.status(500).json({
         error: 'No se pudieron generar suficientes preguntas',
-        details: `Solo se generaron ${allGeneratedQuestions.length} de ${questionCount} preguntas solicitadas (incluso con buffer del 10%). Por favor, intenta de nuevo en unos minutos.`,
+        details: `Solo se generaron ${allGeneratedQuestions.length} de ${questionCount} preguntas solicitadas (incluso con buffer del 20%). Por favor, intenta de nuevo en unos minutos.`,
         generated: allGeneratedQuestions.length,
         requested: questionCount
       });
